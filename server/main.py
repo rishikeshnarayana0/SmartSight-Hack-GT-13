@@ -114,6 +114,32 @@ NAVIGATION_KEY = web.AppKey("navigation", NavigationService)
 COLLISION_WARNING_INTERVAL_SECONDS = 2.0
 
 
+def avoidance_instruction(collision: CollisionResult) -> str:
+    """Choose the side with more visible space around the detected obstacle.
+
+    This is intentionally a small camera-only heuristic: it uses the selected
+    hazard box's horizontal position and width, then tells the person to take
+    the opposite side and continue straight. It is not a guarantee that the
+    chosen side is physically clear.
+    """
+    matching = [
+        detection
+        for detection in collision.detections
+        if detection.label.casefold() == collision.label.casefold()
+    ]
+    candidates = matching or list(collision.detections)
+    if not candidates:
+        # A detector implementation without boxes still gets a deterministic,
+        # conservative spoken instruction.
+        return "Move right, then continue straight."
+
+    obstacle = max(candidates, key=lambda detection: detection.confidence)
+    left_clearance = max(0.0, obstacle.x)
+    right_clearance = max(0.0, 1.0 - (obstacle.x + obstacle.width))
+    direction = "right" if right_clearance >= left_clearance else "left"
+    return f"Move {direction}, then continue straight."
+
+
 async def handle_phone_message(
     websocket: web.WebSocketResponse,
     app: web.Application,
@@ -202,7 +228,10 @@ async def handle_phone_message(
         if not collision.hazard or not warning_emitted:
             return
 
-        detector_message = f"{collision.label.capitalize()} ahead."
+        detector_message = (
+            f"{collision.label.capitalize()} ahead. "
+            f"{avoidance_instruction(collision)}"
+        )
 
         # The detector warning is immediate and throttled. In YOLO-only mode,
         # this is also the complete spoken output; the VLM is optional.

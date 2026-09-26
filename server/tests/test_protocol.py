@@ -8,8 +8,8 @@ from aiohttp.test_utils import TestClient, TestServer
 SERVER_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER_DIR))
 
-from main import DistanceReading, create_app, parse_serial_line
-from detector import CollisionDetector, CollisionResult
+from main import DistanceReading, avoidance_instruction, create_app, parse_serial_line
+from detector import CollisionDetector, CollisionResult, Detection
 from navigation import RoutePlan, RouteStep
 from vision import VisionProvider, VisionResult, parse_vision_output
 
@@ -47,7 +47,38 @@ class FakeVisionProvider(VisionProvider):
 
 class FakeCollisionDetector(CollisionDetector):
     async def detect(self, image_base64: str) -> CollisionResult:
-        return CollisionResult(True, "person", 0.91)
+        return CollisionResult(
+            True,
+            "person",
+            0.91,
+            detections=(Detection("person", 0.91, 0.05, 0.35, 0.2, 0.5),),
+        )
+
+
+class AvoidanceInstructionTests(unittest.TestCase):
+    def test_moves_away_from_left_side_obstacle(self) -> None:
+        collision = CollisionResult(
+            True,
+            "person",
+            0.9,
+            detections=(Detection("person", 0.9, 0.05, 0.3, 0.2, 0.5),),
+        )
+        self.assertEqual(
+            avoidance_instruction(collision),
+            "Move right, then continue straight.",
+        )
+
+    def test_moves_away_from_right_side_obstacle(self) -> None:
+        collision = CollisionResult(
+            True,
+            "chair",
+            0.9,
+            detections=(Detection("chair", 0.9, 0.75, 0.3, 0.2, 0.5),),
+        )
+        self.assertEqual(
+            avoidance_instruction(collision),
+            "Move left, then continue straight.",
+        )
 
 
 class FakeNavigation:
@@ -144,12 +175,15 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual((await websocket.receive_json())["type"], "detector_result")
             warning = await websocket.receive_json()
-            self.assertEqual(warning["message"], "Person ahead.")
+            self.assertEqual(
+                warning["message"],
+                "Person ahead. Move right, then continue straight.",
+            )
             alert = await websocket.receive_json()
             self.assertEqual(alert, {
                 "type": "alert",
                 "source": "detector",
-                "message": "Person ahead.",
+                "message": "Person ahead. Move right, then continue straight.",
             })
 
             await websocket.send_json(
