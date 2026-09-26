@@ -208,7 +208,12 @@ class MockCollisionDetector(CollisionDetector):
 
 
 def build_canny_edge_map(image: Image.Image, width: int = 160, height: int = 120) -> str | None:
-    """Return a transparent PNG edge overlay, downsampled for 10 Hz previews."""
+    """Return Canny edges from the forward walking corridor.
+
+    The trapezoid keeps the overlay focused on the lower-center path region and
+    suppresses most ceiling, wall, and side-background edges. It is a cheap
+    visual heuristic, not semantic walkable-surface segmentation.
+    """
     try:
         import cv2
         import numpy as np
@@ -221,6 +226,18 @@ def build_canny_edge_map(image: Image.Image, width: int = 160, height: int = 120
         gray = cv2.cvtColor(resized, cv2.COLOR_RGB2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blurred, 60, 140)
+        path_mask = np.zeros((height, width), dtype=np.uint8)
+        corridor = np.array(
+            [
+                [int(width * 0.30), int(height * 0.36)],
+                [int(width * 0.70), int(height * 0.36)],
+                [int(width * 0.98), height - 1],
+                [int(width * 0.02), height - 1],
+            ],
+            dtype=np.int32,
+        )
+        cv2.fillConvexPoly(path_mask, corridor, 255)
+        edges = cv2.bitwise_and(edges, edges, mask=path_mask)
         rgba = np.zeros((height, width, 4), dtype=np.uint8)
         rgba[:, :, :3] = 255
         rgba[:, :, 3] = np.where(edges > 0, 190, 0).astype(np.uint8)

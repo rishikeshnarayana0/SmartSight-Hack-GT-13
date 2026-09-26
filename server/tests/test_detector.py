@@ -3,6 +3,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw
 
 SERVER_DIR = Path(__file__).resolve().parents[1]
@@ -32,7 +34,12 @@ class DetectorOverlayTests(unittest.TestCase):
         encoded = build_canny_edge_map(image)
         self.assertIsNotNone(encoded)
         self.assertLess(len(encoded or ""), 20_000)
-        self.assertTrue(base64.b64decode(encoded or "").startswith(b"\x89PNG"))
+        raw = base64.b64decode(encoded or "")
+        self.assertTrue(raw.startswith(b"\x89PNG"))
+        decoded = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        self.assertIsNotNone(decoded)
+        self.assertEqual(int(decoded[:, :, 3].max()), 190)
+        self.assertEqual(int(decoded[:10, :, 3].max()), 0)
 
 
 if __name__ == "__main__":

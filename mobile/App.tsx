@@ -625,7 +625,7 @@ export default function App() {
       <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
       {edgeMap ? (
         <Image
-          accessibilityLabel="Canny edge overlay"
+          accessibilityLabel="Forward path edge overlay"
           source={{ uri: `data:image/png;base64,${edgeMap}` }}
           resizeMode="cover"
           style={styles.edgeOverlay}
@@ -693,7 +693,7 @@ export default function App() {
           </Text>
           <Text style={styles.status}>Inference: {inference}</Text>
           <Text style={styles.status}>
-            Perception: {frameProcessing ? "processing" : streaming ? "ready" : "idle"} · {detections.length} boxes · Canny {edgeMap ? "live" : "off"}
+            Perception: {frameProcessing ? "processing" : streaming ? "ready" : "idle"} · {detections.length} boxes · Path edges {edgeMap ? "live" : "off"}
           </Text>
           <Text style={styles.status}>
             VLM: {!vlmEnabled ? "paused" : pipelineBusy ? "describing collision" : "ready"}

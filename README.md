@@ -16,8 +16,10 @@ frame is not captured while the previous frame is being processed or while
 spoken audio is playing. A likely collision is warned at most once every two
 seconds. The default output is YOLO-only: `Person ahead.` or `Chair ahead.`.
 The camera preview draws normalized YOLO boxes and labels plus a compact Canny
-edge overlay. If the optional Ollama model is enabled, only the warning frame
-is sent for spoken guidance, and the phone pauses capture while it runs.
+overlay limited to a lower-center forward-path trapezoid. This is a cheap ROI
+heuristic, not semantic walkable-path segmentation. If the optional Ollama
+model is enabled, only the warning frame is sent for spoken guidance, and the
+phone pauses capture while it runs.
 
 > This is an experimental aid, not a certified mobility or safety device. Do not rely on it as a replacement for a cane, guide dog, trained assistance, or normal safety practices.
 
