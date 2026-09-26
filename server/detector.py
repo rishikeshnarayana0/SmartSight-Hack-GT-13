@@ -77,6 +77,12 @@ class YoloCollisionDetector(CollisionDetector):
         "backpack",
         "skateboard",
         "stroller",
+        # These labels are available in stair-aware/custom weights. The stock
+        # COCO yolo11n weights do not include a stairs class.
+        "stair",
+        "stairs",
+        "staircase",
+        "stairway",
     }
 
     def __init__(
@@ -169,7 +175,7 @@ class YoloCollisionDetector(CollisionDetector):
                 )
             )
             detection = detections[-1]
-            if label not in self.HAZARD_LABELS:
+            if label.casefold() not in self.HAZARD_LABELS:
                 continue
 
             area_ratio = (box_width * box_height) / max(1.0, width * height)

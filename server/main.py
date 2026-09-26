@@ -112,6 +112,7 @@ PIPELINE_STATE_KEY = web.AppKey("pipeline_state", PipelineState)
 NAVIGATION_KEY = web.AppKey("navigation", NavigationService)
 
 COLLISION_WARNING_INTERVAL_SECONDS = 2.0
+STAIR_LABELS = frozenset(("stair", "stairs", "staircase", "stairway"))
 
 
 def avoidance_instruction(collision: CollisionResult) -> str:
@@ -142,6 +143,13 @@ def avoidance_instruction(collision: CollisionResult) -> str:
     right_clearance = max(0.0, 1.0 - (obstacle.x + obstacle.width))
     direction = "right" if right_clearance >= left_clearance else "left"
     return f"Move {direction}, then continue straight."
+
+
+def obstacle_instruction(collision: CollisionResult) -> str:
+    """Return the short spoken instruction for a detected obstacle."""
+    if collision.label.casefold() in STAIR_LABELS:
+        return "Climb the stairs, then continue straight."
+    return avoidance_instruction(collision)
 
 
 async def handle_phone_message(
@@ -234,7 +242,7 @@ async def handle_phone_message(
 
         detector_message = (
             f"{collision.label.capitalize()} detected. "
-            f"{avoidance_instruction(collision)}"
+            f"{obstacle_instruction(collision)}"
         )
 
         # The detector warning is immediate and throttled. In YOLO-only mode,

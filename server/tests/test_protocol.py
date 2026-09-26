@@ -8,7 +8,13 @@ from aiohttp.test_utils import TestClient, TestServer
 SERVER_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER_DIR))
 
-from main import DistanceReading, avoidance_instruction, create_app, parse_serial_line
+from main import (
+    DistanceReading,
+    avoidance_instruction,
+    create_app,
+    obstacle_instruction,
+    parse_serial_line,
+)
 from detector import CollisionDetector, CollisionResult, Detection
 from navigation import RoutePlan, RouteStep
 from vision import VisionProvider, VisionResult, parse_vision_output
@@ -56,6 +62,18 @@ class FakeCollisionDetector(CollisionDetector):
 
 
 class AvoidanceInstructionTests(unittest.TestCase):
+    def test_stairs_instruction_says_to_climb(self) -> None:
+        collision = CollisionResult(
+            True,
+            "stairs",
+            0.9,
+            detections=(Detection("stairs", 0.9, 0.2, 0.35, 0.6, 0.5),),
+        )
+        self.assertEqual(
+            obstacle_instruction(collision),
+            "Climb the stairs, then continue straight.",
+        )
+
     def test_moves_away_from_left_side_obstacle(self) -> None:
         collision = CollisionResult(
             True,
