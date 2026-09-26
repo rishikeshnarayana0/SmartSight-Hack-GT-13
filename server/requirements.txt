@@ -1,0 +1,4 @@
+aiohttp>=3.11,<4
+pyserial>=3.5,<4
+Pillow>=11,<13
+ultralytics>=8.3,<9
