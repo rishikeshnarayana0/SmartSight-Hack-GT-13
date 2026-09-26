@@ -151,6 +151,13 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
                 "source": "detector",
                 "message": "Person ahead.",
             })
+
+            await websocket.send_json(
+                {"type": "frame", "id": "frame-2", "image": "base64-jpeg"}
+            )
+            throttled = await websocket.receive_json()
+            self.assertEqual(throttled["type"], "detector_result")
+            self.assertFalse(throttled["warning_emitted"])
         finally:
             await client.close()
 

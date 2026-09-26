@@ -11,10 +11,13 @@ A deliberately small proof of concept for an obstacle-warning wearable:
 
 The phone is the camera. The hardware distance sensor remains an independent
 detector and still works if Wi-Fi drops. Camera frames are checked by YOLO at
-the phone's one-second capture rate. A likely collision is warned at most once
-every two seconds. The default output is YOLO-only: `Person ahead.` or `Chair
-ahead.`. If the optional Ollama model is enabled, only the warning frame is
-sent for spoken guidance, and the phone pauses capture while it runs.
+up to ten frames per second, with a strict one-frame-in-flight gate. A new
+frame is not captured while the previous frame is being processed or while
+spoken audio is playing. A likely collision is warned at most once every two
+seconds. The default output is YOLO-only: `Person ahead.` or `Chair ahead.`.
+The camera preview draws normalized YOLO boxes and labels plus a compact Canny
+edge overlay. If the optional Ollama model is enabled, only the warning frame
+is sent for spoken guidance, and the phone pauses capture while it runs.
 
 > This is an experimental aid, not a certified mobility or safety device. Do not rely on it as a replacement for a cane, guide dog, trained assistance, or normal safety practices.
 
@@ -173,8 +176,9 @@ here only for a key-free demo. The computer and phone must be on the same
 network.
 
 To change the capture interval, set `EXPO_PUBLIC_CAPTURE_INTERVAL_MS` before
-starting Expo. For example, `500` captures twice per second; values below 500
-ms are clamped.
+starting Expo. The default is `100` ms (up to ten attempts per second); values
+below 100 ms are clamped. The in-flight and audio gates can make the observed
+rate lower when inference or speech takes longer.
 
 Use **Test alert** before connecting hardware. It exercises the complete server-to-phone haptic and speech path.
 
@@ -201,6 +205,7 @@ Server to phone:
 {"type":"alert","source":"hardware","message":"Obstacle 42 centimeters ahead."}
 {"type":"collision_warning","source":"detector","label":"person","message":"Person ahead."}
 {"type":"alert","source":"detector","message":"Person ahead."}
+{"type":"detector_result","hazard":false,"label":"object","confidence":0,"detections":[],"edge_map":"base64-png","warning_emitted":false}
 {"type":"pipeline_state","state":"busy"}
 {"type":"vision_result","hazard":true,"message":"Step left."}
 {"type":"route_plan","route":{"destination":"Student Center","distance_m":312,"duration_s":240,"steps":[{"instruction":"Start walking.","distance_m":70,"distance_to_maneuver_m":0,"latitude":33.7756,"longitude":-84.3963}]}}

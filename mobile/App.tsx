@@ -11,6 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
+  Image,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -19,6 +20,15 @@ import {
 } from "react-native";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
+
+type Detection = {
+  label: string;
+  confidence: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 type RouteStep = {
   instruction: string;
@@ -45,6 +55,9 @@ type ServerMessage = {
   label?: string;
   vlm_enabled?: boolean;
   route?: RoutePlan;
+  detections?: Detection[];
+  edge_map?: string | null;
+  warning_emitted?: boolean;
 };
 
 function distanceBetweenMeters(
@@ -75,8 +88,8 @@ function formatRouteSummary(route: RoutePlan): string {
 const DEFAULT_SERVER_URL =
   process.env.EXPO_PUBLIC_SERVER_URL ?? "ws://localhost:8765/ws";
 const CAPTURE_INTERVAL_MS = Math.max(
-  500,
-  Number(process.env.EXPO_PUBLIC_CAPTURE_INTERVAL_MS ?? "1000") || 1000,
+  100,
+  Number(process.env.EXPO_PUBLIC_CAPTURE_INTERVAL_MS ?? "100") || 100,
 );
 
 export default function App() {
@@ -96,6 +109,9 @@ export default function App() {
   const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
   const [routeStepIndex, setRouteStepIndex] = useState(0);
   const [navigationStatus, setNavigationStatus] = useState("No route yet");
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [edgeMap, setEdgeMap] = useState<string | null>(null);
+  const [frameProcessing, setFrameProcessing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const destinationTextRef = useRef("");
   const pendingDestinationRef = useRef("");
@@ -108,22 +124,62 @@ export default function App() {
   const routeStepIndexRef = useRef(0);
   const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
   const routeRequestPendingRef = useRef(false);
+  const frameInFlightRef = useRef(false);
+  const audioBusyRef = useRef(false);
+  const speechQueueRef = useRef<Array<{ message: string; buzz: boolean }>>([]);
 
   const buzz = useCallback(() => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
   }, []);
 
-  const deliverAlert = useCallback((message: string) => {
-    setLastAlert(message);
-    buzz();
-    Speech.stop();
-    Speech.speak(message, { language: "en", rate: 0.95 });
-  }, [buzz]);
+  const enqueueSpeech = useCallback(
+    (message: string, shouldBuzz: boolean) => {
+      setLastAlert(message);
+      const queue = speechQueueRef.current;
+      if (audioBusyRef.current || queue.length > 0) {
+        if (queue.length < 4 && queue[queue.length - 1]?.message !== message) {
+          queue.push({ message, buzz: shouldBuzz });
+        }
+        return;
+      }
 
-  const speakInstruction = useCallback((message: string) => {
-    setLastAlert(message);
+      const playNext = () => {
+        const next = speechQueueRef.current.shift();
+        if (!next) {
+          audioBusyRef.current = false;
+          return;
+        }
+        audioBusyRef.current = true;
+        if (next.buzz) buzz();
+        Speech.speak(next.message, {
+          language: "en",
+          rate: next.buzz ? 0.95 : 0.9,
+          onDone: playNext,
+          onStopped: playNext,
+          onError: playNext,
+        });
+      };
+
+      speechQueueRef.current.push({ message, buzz: shouldBuzz });
+      playNext();
+    },
+    [buzz],
+  );
+
+  const deliverAlert = useCallback(
+    (message: string) => enqueueSpeech(message, true),
+    [enqueueSpeech],
+  );
+
+  const speakInstruction = useCallback(
+    (message: string) => enqueueSpeech(message, false),
+    [enqueueSpeech],
+  );
+
+  const stopAudio = useCallback(() => {
+    speechQueueRef.current = [];
+    audioBusyRef.current = false;
     Speech.stop();
-    Speech.speak(message, { language: "en", rate: 0.9 });
   }, []);
 
   const stopLocationTracking = useCallback(() => {
@@ -186,14 +242,19 @@ export default function App() {
     vlmBusyRef.current = false;
     setPipelineBusy(false);
     setSpeechListening(false);
+    stopAudio();
     stopLocationTracking();
+    setDetections([]);
+    setEdgeMap(null);
+    frameInFlightRef.current = false;
+    setFrameProcessing(false);
     routePlanRef.current = null;
     routeStepIndexRef.current = 0;
     routeRequestPendingRef.current = false;
     setRoutePlan(null);
     setRouteStepIndex(0);
     setNavigationStatus("No route yet");
-  }, [stopLocationTracking]);
+  }, [stopAudio, stopLocationTracking]);
 
   const connect = useCallback(() => {
     disconnect();
@@ -229,15 +290,30 @@ export default function App() {
           const busy = payload.state === "busy";
           vlmBusyRef.current = busy;
           setPipelineBusy(busy);
+          if (!busy && frameInFlightRef.current) {
+            frameInFlightRef.current = false;
+            setFrameProcessing(false);
+          }
+        } else if (payload.type === "pipeline_busy") {
+          frameInFlightRef.current = false;
+          setFrameProcessing(false);
         } else if (payload.type === "collision_warning") {
           setInference(`possible collision: ${payload.label ?? "object"}`);
         } else if (payload.type === "detector_result") {
+          if (!payload.hazard || payload.warning_emitted === false) {
+            frameInFlightRef.current = false;
+            setFrameProcessing(false);
+          }
+          setDetections(payload.detections ?? []);
+          setEdgeMap(payload.edge_map ?? null);
           setInference(
             payload.hazard
               ? `possible collision: ${payload.label ?? "object"}`
               : "clear",
           );
         } else if (payload.type === "alert" && payload.message) {
+          frameInFlightRef.current = false;
+          setFrameProcessing(false);
           deliverAlert(payload.message);
         } else if (payload.type === "vision_result") {
           setInference(
@@ -246,6 +322,8 @@ export default function App() {
         } else if (payload.type === "inference_error") {
           setInference(`error: ${payload.message ?? "inference failed"}`);
         } else if (payload.type === "detector_error") {
+          frameInFlightRef.current = false;
+          setFrameProcessing(false);
           setInference(`detector error: ${payload.message ?? "detector failed"}`);
         } else if (payload.type === "distance" && typeof payload.cm === "number") {
           setDistance(payload.cm);
@@ -262,6 +340,8 @@ export default function App() {
         setStreaming(false);
         streamingRef.current = false;
         routeRequestPendingRef.current = false;
+        frameInFlightRef.current = false;
+        setFrameProcessing(false);
         stopLocationTracking();
       }
     };
@@ -280,6 +360,8 @@ export default function App() {
       !streamingRef.current ||
       vlmBusyRef.current ||
       capturingRef.current ||
+      frameInFlightRef.current ||
+      audioBusyRef.current ||
       !cameraRef.current ||
       !socket ||
       socket.readyState !== WebSocket.OPEN
@@ -288,21 +370,39 @@ export default function App() {
     }
 
     capturingRef.current = true;
+    frameInFlightRef.current = true;
+    setFrameProcessing(true);
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.4,
         skipProcessing: true,
         shutterSound: false,
       });
-      if (!photo) return;
+      if (!photo) {
+        frameInFlightRef.current = false;
+        setFrameProcessing(false);
+        return;
+      }
 
       const resized = await ImageManipulator.manipulateAsync(
         photo.uri,
         [{ resize: { width: 320 } }],
         { compress: 0.45, format: ImageManipulator.SaveFormat.JPEG, base64: true },
       );
-      if (!resized.base64) return;
-      if (vlmBusyRef.current || socket.readyState !== WebSocket.OPEN) return;
+      if (!resized.base64) {
+        frameInFlightRef.current = false;
+        setFrameProcessing(false);
+        return;
+      }
+      if (
+        vlmBusyRef.current ||
+        audioBusyRef.current ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
+        frameInFlightRef.current = false;
+        setFrameProcessing(false);
+        return;
+      }
 
       socket.send(
         JSON.stringify({
@@ -312,6 +412,8 @@ export default function App() {
         }),
       );
     } catch {
+      frameInFlightRef.current = false;
+      setFrameProcessing(false);
       setLastAlert("Camera frame failed");
     } finally {
       capturingRef.current = false;
@@ -476,9 +578,13 @@ export default function App() {
     setRoutePlan(null);
     setRouteStepIndex(0);
     setNavigationStatus("Navigation stopped");
+    setDetections([]);
+    setEdgeMap(null);
+    frameInFlightRef.current = false;
+    setFrameProcessing(false);
     stopLocationTracking();
-    Speech.stop();
-  }, [stopLocationTracking]);
+    stopAudio();
+  }, [stopAudio, stopLocationTracking]);
 
   const toggleStreaming = () => {
     if (streamingRef.current) {
@@ -517,6 +623,34 @@ export default function App() {
     <View style={styles.screen}>
       <StatusBar style="light" />
       <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
+      {edgeMap ? (
+        <Image
+          accessibilityLabel="Canny edge overlay"
+          source={{ uri: `data:image/png;base64,${edgeMap}` }}
+          resizeMode="cover"
+          style={styles.edgeOverlay}
+        />
+      ) : null}
+      <View pointerEvents="none" style={styles.boxOverlay}>
+        {detections.map((detection, index) => (
+          <View
+            key={`${detection.label}-${index}`}
+            style={[
+              styles.detectionBox,
+              {
+                left: `${detection.x * 100}%`,
+                top: `${detection.y * 100}%`,
+                width: `${detection.width * 100}%`,
+                height: `${detection.height * 100}%`,
+              },
+            ]}
+          >
+            <Text style={styles.detectionLabel}>
+              {detection.label} {Math.round(detection.confidence * 100)}%
+            </Text>
+          </View>
+        ))}
+      </View>
       <SafeAreaView style={styles.overlay}>
         <View style={styles.panel}>
           <Text style={styles.title}>Assistive Prototype</Text>
@@ -559,6 +693,9 @@ export default function App() {
           </Text>
           <Text style={styles.status}>Inference: {inference}</Text>
           <Text style={styles.status}>
+            Perception: {frameProcessing ? "processing" : streaming ? "ready" : "idle"} · {detections.length} boxes · Canny {edgeMap ? "live" : "off"}
+          </Text>
+          <Text style={styles.status}>
             VLM: {!vlmEnabled ? "paused" : pipelineBusy ? "describing collision" : "ready"}
           </Text>
           <Text style={styles.status}>Navigation: {navigationStatus}</Text>
@@ -593,6 +730,35 @@ export default function App() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#090c10" },
+  edgeOverlay: {
+    bottom: 0,
+    left: 0,
+    opacity: 0.7,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  boxOverlay: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  detectionBox: {
+    borderColor: "#63f2a1",
+    borderWidth: 2,
+    position: "absolute",
+  },
+  detectionLabel: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(8, 16, 12, 0.85)",
+    color: "#b9ffd1",
+    fontSize: 12,
+    fontWeight: "700",
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
   overlay: { flex: 1, justifyContent: "flex-end" },
   panel: {
     backgroundColor: "rgba(9, 12, 16, 0.90)",

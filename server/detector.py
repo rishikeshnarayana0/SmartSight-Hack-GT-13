@@ -17,10 +17,34 @@ class DetectorError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class Detection:
+    """A normalized box that the phone can draw over its camera preview."""
+
+    label: str
+    confidence: float
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "confidence": round(self.confidence, 3),
+            "x": round(self.x, 4),
+            "y": round(self.y, 4),
+            "width": round(self.width, 4),
+            "height": round(self.height, 4),
+        }
+
+
+@dataclass(frozen=True)
 class CollisionResult:
     hazard: bool
     label: str = "object"
     confidence: float = 0.0
+    detections: tuple[Detection, ...] = ()
+    edge_map: str | None = None
 
 
 class CollisionDetector:
@@ -93,6 +117,8 @@ class YoloCollisionDetector(CollisionDetector):
         except (binascii.Error, ValueError, OSError) as exc:
             raise DetectorError("Camera frame was not valid base64 image data") from exc
 
+        edge_map = build_canny_edge_map(image)
+
         model = self._load_model()
         try:
             results = model.predict(
@@ -105,16 +131,17 @@ class YoloCollisionDetector(CollisionDetector):
             raise DetectorError("YOLO failed to process the camera frame") from exc
 
         if not results:
-            return CollisionResult(False)
+            return CollisionResult(False, edge_map=edge_map)
 
         result = results[0]
         boxes = getattr(result, "boxes", None)
         names = getattr(result, "names", {})
         if boxes is None:
-            return CollisionResult(False)
+            return CollisionResult(False, edge_map=edge_map)
 
         width, height = image.size
         best: CollisionResult | None = None
+        detections: list[Detection] = []
         for box in boxes:
             try:
                 class_id = int(box.cls[0].item())
@@ -123,12 +150,26 @@ class YoloCollisionDetector(CollisionDetector):
             except (AttributeError, IndexError, TypeError, ValueError):
                 continue
 
-            label = str(names[class_id] if isinstance(names, dict) else names[class_id])
-            if label not in self.HAZARD_LABELS:
+            try:
+                label = str(names[class_id] if isinstance(names, dict) else names[class_id])
+            except (KeyError, IndexError, TypeError):
                 continue
 
             box_width = max(0.0, x2 - x1)
             box_height = max(0.0, y2 - y1)
+            detections.append(
+                Detection(
+                    label=label,
+                    confidence=confidence,
+                    x=max(0.0, min(1.0, x1 / max(1.0, width))),
+                    y=max(0.0, min(1.0, y1 / max(1.0, height))),
+                    width=max(0.0, min(1.0, box_width / max(1.0, width))),
+                    height=max(0.0, min(1.0, box_height / max(1.0, height))),
+                )
+            )
+            if label not in self.HAZARD_LABELS:
+                continue
+
             area_ratio = (box_width * box_height) / max(1.0, width * height)
             center_x = ((x1 + x2) / 2) / max(1.0, width)
             bottom_ratio = y2 / max(1.0, height)
@@ -142,7 +183,15 @@ class YoloCollisionDetector(CollisionDetector):
             ):
                 best = CollisionResult(True, label, confidence)
 
-        return best or CollisionResult(False)
+        if best is None:
+            return CollisionResult(False, detections=tuple(detections), edge_map=edge_map)
+        return CollisionResult(
+            True,
+            best.label,
+            best.confidence,
+            tuple(detections),
+            edge_map,
+        )
 
     async def detect(self, image_base64: str) -> CollisionResult:
         return await asyncio.to_thread(self._detect_sync, image_base64)
@@ -157,3 +206,27 @@ class MockCollisionDetector(CollisionDetector):
     async def detect(self, image_base64: str) -> CollisionResult:
         return CollisionResult(False)
 
+
+def build_canny_edge_map(image: Image.Image, width: int = 160, height: int = 120) -> str | None:
+    """Return a transparent PNG edge overlay, downsampled for 10 Hz previews."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+
+    try:
+        rgb = np.asarray(image.convert("RGB"))
+        resized = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(resized, cv2.COLOR_RGB2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 60, 140)
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba[:, :, :3] = 255
+        rgba[:, :, 3] = np.where(edges > 0, 190, 0).astype(np.uint8)
+        encoded, png = cv2.imencode(".png", rgba)
+        if not encoded:
+            return None
+        return base64.b64encode(png.tobytes()).decode("ascii")
+    except (TypeError, ValueError, cv2.error):
+        return None

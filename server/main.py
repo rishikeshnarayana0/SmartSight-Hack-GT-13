@@ -174,6 +174,18 @@ async def handle_phone_message(
                 )
                 return
 
+        warning_emitted = False
+        if collision.hazard:
+            now = time.monotonic()
+            warning_emitted = (
+                now - app[PIPELINE_STATE_KEY].last_collision_at
+                >= COLLISION_WARNING_INTERVAL_SECONDS
+            )
+            if warning_emitted:
+                app[PIPELINE_STATE_KEY].last_collision_at = now
+        else:
+            app[PIPELINE_STATE_KEY].last_collision_at = 0.0
+
         await websocket.send_json(
             {
                 "type": "detector_result",
@@ -181,17 +193,14 @@ async def handle_phone_message(
                 "hazard": collision.hazard,
                 "label": collision.label,
                 "confidence": round(collision.confidence, 3),
+                "detections": [detection.as_dict() for detection in collision.detections],
+                "edge_map": collision.edge_map,
+                "warning_emitted": warning_emitted,
             }
         )
 
-        if not collision.hazard:
-            state.last_collision_at = 0.0
+        if not collision.hazard or not warning_emitted:
             return
-
-        now = time.monotonic()
-        if now - state.last_collision_at < COLLISION_WARNING_INTERVAL_SECONDS:
-            return
-        state.last_collision_at = now
 
         detector_message = f"{collision.label.capitalize()} ahead."
 
