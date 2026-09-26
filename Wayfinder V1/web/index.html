@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#071b2d"><title>Wayfinder</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">ASSISTIVE WALKING COMPANION</p><h1>Wayfinder</h1><p id="status" aria-live="polite">Ready to connect the rear camera.</p></header>
+    <section class="warning clear" id="warning" aria-live="assertive"><span id="warningIcon">✓</span><div><strong id="warningTitle">Camera off</strong><p id="warningText">Enable the camera to scan every 2 seconds.</p></div></section>
+    <section class="camera"><video id="camera" playsinline muted></video><canvas id="capture" hidden></canvas><div class="scan"><span></span></div></section>
+    <div class="actions"><button id="enable" class="primary">Enable alerts & camera</button><button id="pause" disabled>Pause scanning</button></div>
+    <section class="panel"><p class="eyebrow">VOICE NAVIGATION</p><label for="destination">Where would you like to go?</label><div class="destination"><input id="destination" placeholder="e.g., Portland Art Museum" autocomplete="off"><button id="listen" aria-label="Speak destination">🎙</button></div><button id="route" class="wide">Get walking directions</button><p id="location" class="muted">Location is only sent when you request directions.</p><article id="directions" hidden aria-live="polite"></article></section>
+    <details><summary>Important safety limits</summary><p>This is a warning aid. It can miss hazards such as curbs, glass, narrow objects, overhead obstacles, and traffic. Do not rely on it as your sole mobility or street-crossing aid.</p></details>
+  </main><script src="/static/app.js"></script>
+</body></html>

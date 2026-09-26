@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Wayfinder",
+    "slug": "wayfinder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Wayfinder uses the rear camera to warn about nearby obstacles.",
+        "NSLocationWhenInUseUsageDescription": "Wayfinder uses your live location for spoken walking directions.",
+        "NSLocalNetworkUsageDescription": "Wayfinder connects to the local vision and routing service on your computer."
+      }
+    },
+    "android": {
+      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "VIBRATE"]
+    },
+    "plugins": ["expo-camera", "expo-location"]
+  }
+}

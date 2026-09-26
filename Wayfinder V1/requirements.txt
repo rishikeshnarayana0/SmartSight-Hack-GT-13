@@ -1,0 +1,7 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+ultralytics==8.3.133
+pillow==11.2.1
+numpy==2.2.5
+python-dotenv==1.1.0

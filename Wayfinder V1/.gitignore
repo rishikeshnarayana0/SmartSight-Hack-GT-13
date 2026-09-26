@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+mobile/.env.local
+node_modules/
+mobile/node_modules/
+mobile/.expo/
+__pycache__/
+*.py[cod]
+.venv/
+work/
+outputs/
+*.log
+*.pt
+
