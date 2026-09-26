@@ -6,7 +6,8 @@ A deliberately small proof of concept for an obstacle-warning wearable:
 - A vibration motor gives immediate feedback without relying on a network.
 - A small Python server runs a fast YOLO collision gate on phone-camera frames,
   then calls a vision-language model only when the gate finds a likely obstacle.
-- An Expo phone app provides camera streaming, speech recognition, haptics, and spoken alerts.
+- An Expo phone app provides camera streaming, speech recognition, walking routes,
+  haptics, and spoken alerts.
 
 The phone is the camera. The hardware distance sensor remains an independent
 detector and still works if Wi-Fi drops. Camera frames are checked by YOLO at
@@ -151,18 +152,24 @@ npm install
 npx expo start --dev-client
 ```
 
+Navigation adds the native `expo-location` module. After pulling this change,
+rebuild the local iOS development app once with `npx expo run:ios --device`
+before starting Metro again.
+
 The SDK 57 mobile dependencies require Node.js 22.13.0 or newer. The mobile
 folder includes an `.nvmrc` with the minimum supported version.
 
 In the app, enter `ws://YOUR_COMPUTER_LAN_IP:8765/ws` and tap **Connect**.
 Then tap **Start camera / speak** and say a destination when prompted. The app
-stops listening after the recognizer returns the destination, then starts the
-camera loop. Every second the phone captures a small JPEG and sends it to YOLO.
-In the default mode, a possible collision triggers an immediate haptic warning
-and a short spoken label such as `Person ahead.`. If Qwen is enabled, the phone
-waits for it to finish before capturing another frame. The destination capture
-is the first navigation MVP step; route calculation and turn-by-turn
-instructions are not yet connected. The computer and phone must be on the same
+requests foreground location, sends the destination and current coordinates to
+the laptop, and receives a walking route. It speaks the first step and watches
+GPS to speak each following step as you reach the maneuver. Every second the
+phone also captures a small JPEG and sends it to YOLO. In the default mode, a
+possible collision triggers an immediate haptic warning and a short spoken label
+such as `Person ahead.`. If Qwen is enabled, the phone waits for it to finish
+before capturing another frame. Routing uses OpenStreetMap Nominatim plus the
+public OpenStreetMap foot router; those services are rate limited and intended
+here only for a key-free demo. The computer and phone must be on the same
 network.
 
 To change the capture interval, set `EXPO_PUBLIC_CAPTURE_INTERVAL_MS` before
@@ -178,6 +185,7 @@ Phone to server:
 ```json
 {"type":"frame","id":"123","image":"base64-jpeg"}
 {"type":"demo_alert"}
+{"type":"route_start","destination":"Student Center","latitude":33.7756,"longitude":-84.3963}
 ```
 
 Hardware to server, over USB serial:
@@ -195,6 +203,7 @@ Server to phone:
 {"type":"alert","source":"detector","message":"Person ahead."}
 {"type":"pipeline_state","state":"busy"}
 {"type":"vision_result","hazard":true,"message":"Step left."}
+{"type":"route_plan","route":{"destination":"Student Center","distance_m":312,"duration_s":240,"steps":[{"instruction":"Start walking.","distance_m":70,"distance_to_maneuver_m":0,"latitude":33.7756,"longitude":-84.3963}]}}
 ```
 
 The clean extension points are `server/detector.py` for replacing YOLO and

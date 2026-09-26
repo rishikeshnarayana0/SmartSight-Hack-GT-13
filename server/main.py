@@ -50,6 +50,11 @@ except ImportError:  # Supports `python server/main.py` from the project root.
     )
 
 try:
+    from .navigation import NavigationError, NavigationService
+except ImportError:  # Supports `python server/main.py` from the project root.
+    from navigation import NavigationError, NavigationService
+
+try:
     import serial
 except ImportError:  # Allows protocol tests to run before dependencies are installed.
     serial = None
@@ -104,6 +109,7 @@ DETECTOR_KEY = web.AppKey("detector", CollisionDetector)
 INFERENCE_LOCK_KEY = web.AppKey("inference_lock", asyncio.Lock)
 DETECTOR_LOCK_KEY = web.AppKey("detector_lock", asyncio.Lock)
 PIPELINE_STATE_KEY = web.AppKey("pipeline_state", PipelineState)
+NAVIGATION_KEY = web.AppKey("navigation", NavigationService)
 
 COLLISION_WARNING_INTERVAL_SECONDS = 2.0
 
@@ -115,6 +121,34 @@ async def handle_phone_message(
 ) -> None:
     hub = app[HUB_KEY]
     message_type = payload.get("type")
+
+    if message_type == "route_start":
+        destination = payload.get("destination")
+        latitude = payload.get("latitude")
+        longitude = payload.get("longitude")
+        if (
+            not isinstance(destination, str)
+            or not destination.strip()
+            or not isinstance(latitude, (int, float))
+            or not isinstance(longitude, (int, float))
+            or not -90 <= latitude <= 90
+            or not -180 <= longitude <= 180
+        ):
+            await websocket.send_json(
+                {"type": "route_error", "message": "Destination and location are required."}
+            )
+            return
+
+        try:
+            route = await app[NAVIGATION_KEY].plan(
+                float(latitude), float(longitude), destination
+            )
+        except NavigationError as exc:
+            await websocket.send_json({"type": "route_error", "message": str(exc)})
+            return
+
+        await websocket.send_json({"type": "route_plan", "route": route.as_dict()})
+        return
 
     if message_type == "frame":
         frame_id = str(payload.get("id", ""))
@@ -328,6 +362,7 @@ def create_app(
     vision_provider: VisionProvider | None = None,
     detector: CollisionDetector | None = None,
     vision_enabled: bool | None = None,
+    navigation: NavigationService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=4 * 1024 * 1024)
     app[HUB_KEY] = Hub()
@@ -341,6 +376,7 @@ def create_app(
     app[INFERENCE_LOCK_KEY] = asyncio.Lock()
     app[DETECTOR_LOCK_KEY] = asyncio.Lock()
     app[PIPELINE_STATE_KEY] = PipelineState()
+    app[NAVIGATION_KEY] = navigation or NavigationService()
     app.router.add_get("/health", health_handler)
     app.router.add_get("/ws", websocket_handler)
 
@@ -357,6 +393,7 @@ def create_app(
             with suppress(asyncio.CancelledError):
                 await task
         await application[VISION_PROVIDER_KEY].close()
+        await application[NAVIGATION_KEY].close()
 
     app.on_startup.append(start_background_tasks)
     app.on_cleanup.append(stop_background_tasks)

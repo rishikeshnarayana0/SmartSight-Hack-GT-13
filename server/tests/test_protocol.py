@@ -10,6 +10,7 @@ sys.path.insert(0, str(SERVER_DIR))
 
 from main import DistanceReading, create_app, parse_serial_line
 from detector import CollisionDetector, CollisionResult
+from navigation import RoutePlan, RouteStep
 from vision import VisionProvider, VisionResult, parse_vision_output
 
 
@@ -47,6 +48,22 @@ class FakeVisionProvider(VisionProvider):
 class FakeCollisionDetector(CollisionDetector):
     async def detect(self, image_base64: str) -> CollisionResult:
         return CollisionResult(True, "person", 0.91)
+
+
+class FakeNavigation:
+    async def plan(self, latitude: float, longitude: float, destination: str) -> RoutePlan:
+        return RoutePlan(
+            destination=destination,
+            distance_m=120.0,
+            duration_s=90.0,
+            steps=(
+                RouteStep("Start walking.", 80.0, 0.0, latitude, longitude),
+                RouteStep("Turn right.", 40.0, 80.0, latitude + 0.001, longitude + 0.001),
+            ),
+        )
+
+    async def close(self) -> None:
+        return None
 
 
 class WebSocketTests(unittest.IsolatedAsyncioTestCase):
@@ -134,6 +151,27 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
                 "source": "detector",
                 "message": "Person ahead.",
             })
+        finally:
+            await client.close()
+
+    async def test_route_start_returns_step_by_step_plan(self) -> None:
+        client = TestClient(TestServer(create_app(navigation=FakeNavigation())))
+        await client.start_server()
+        try:
+            websocket = await client.ws_connect("/ws")
+            await websocket.receive_json()
+            await websocket.send_json(
+                {
+                    "type": "route_start",
+                    "destination": "Student Center",
+                    "latitude": 33.7756,
+                    "longitude": -84.3963,
+                }
+            )
+            response = await websocket.receive_json()
+            self.assertEqual(response["type"], "route_plan")
+            self.assertEqual(response["route"]["destination"], "Student Center")
+            self.assertEqual(response["route"]["steps"][1]["instruction"], "Turn right.")
         finally:
             await client.close()
 

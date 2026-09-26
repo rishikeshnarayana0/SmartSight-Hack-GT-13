@@ -12,6 +12,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "The prototype uses the camera to send test frames to your local server.",
         "NSMicrophoneUsageDescription": "Allow the prototype to capture your spoken destination.",
+        "NSLocationWhenInUseUsageDescription": "Allow the prototype to use your location for walking directions.",
         "NSSpeechRecognitionUsageDescription": "Allow the prototype to convert your spoken destination into text.",
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -39,6 +40,12 @@
         {
           "microphonePermission": "Allow the prototype to capture your spoken destination.",
           "speechRecognitionPermission": "Allow the prototype to convert your spoken destination into text."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow the prototype to use your location for walking directions."
         }
       ]
     ],

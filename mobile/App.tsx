@@ -1,6 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as Location from "expo-location";
 import * as Speech from "expo-speech";
 import {
   ExpoSpeechRecognitionModule,
@@ -19,6 +20,21 @@ import {
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
 
+type RouteStep = {
+  instruction: string;
+  distance_m: number;
+  distance_to_maneuver_m: number;
+  latitude: number;
+  longitude: number;
+};
+
+type RoutePlan = {
+  destination: string;
+  distance_m: number;
+  duration_s: number;
+  steps: RouteStep[];
+};
+
 type ServerMessage = {
   type: string;
   message?: string;
@@ -28,7 +44,33 @@ type ServerMessage = {
   state?: "busy" | "idle";
   label?: string;
   vlm_enabled?: boolean;
+  route?: RoutePlan;
 };
+
+function distanceBetweenMeters(
+  firstLatitude: number,
+  firstLongitude: number,
+  secondLatitude: number,
+  secondLongitude: number,
+): number {
+  const earthRadius = 6_371_000;
+  const latitudeDelta = ((secondLatitude - firstLatitude) * Math.PI) / 180;
+  const longitudeDelta = ((secondLongitude - firstLongitude) * Math.PI) / 180;
+  const first = (firstLatitude * Math.PI) / 180;
+  const second = (secondLatitude * Math.PI) / 180;
+  const a =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.sin(longitudeDelta / 2) ** 2 * Math.cos(first) * Math.cos(second);
+  return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatRouteSummary(route: RoutePlan): string {
+  const kilometers = route.distance_m / 1000;
+  const minutes = Math.max(1, Math.round(route.duration_s / 60));
+  return kilometers >= 1
+    ? `${kilometers.toFixed(1)} km, about ${minutes} min`
+    : `${Math.round(route.distance_m)} m, about ${minutes} min`;
+}
 
 const DEFAULT_SERVER_URL =
   process.env.EXPO_PUBLIC_SERVER_URL ?? "ws://localhost:8765/ws";
@@ -51,6 +93,9 @@ export default function App() {
   const [destination, setDestination] = useState("");
   const [destinationPrompt, setDestinationPrompt] = useState("");
   const [speechListening, setSpeechListening] = useState(false);
+  const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [routeStepIndex, setRouteStepIndex] = useState(0);
+  const [navigationStatus, setNavigationStatus] = useState("No route yet");
   const cameraRef = useRef<CameraView>(null);
   const destinationTextRef = useRef("");
   const pendingDestinationRef = useRef("");
@@ -59,6 +104,10 @@ export default function App() {
   const capturingRef = useRef(false);
   const vlmBusyRef = useRef(false);
   const speechListeningRef = useRef(false);
+  const routePlanRef = useRef<RoutePlan | null>(null);
+  const routeStepIndexRef = useRef(0);
+  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const routeRequestPendingRef = useRef(false);
 
   const buzz = useCallback(() => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -70,6 +119,58 @@ export default function App() {
     Speech.stop();
     Speech.speak(message, { language: "en", rate: 0.95 });
   }, [buzz]);
+
+  const speakInstruction = useCallback((message: string) => {
+    setLastAlert(message);
+    Speech.stop();
+    Speech.speak(message, { language: "en", rate: 0.9 });
+  }, []);
+
+  const stopLocationTracking = useCallback(() => {
+    locationSubscriptionRef.current?.remove();
+    locationSubscriptionRef.current = null;
+  }, []);
+
+  const handleLocationUpdate = useCallback(
+    (location: Location.LocationObject) => {
+      const plan = routePlanRef.current;
+      if (!plan || plan.steps.length < 2) return;
+
+      let nextIndex = routeStepIndexRef.current;
+      while (nextIndex < plan.steps.length - 1) {
+        const nextStep = plan.steps[nextIndex + 1];
+        const metersAway = distanceBetweenMeters(
+          location.coords.latitude,
+          location.coords.longitude,
+          nextStep.latitude,
+          nextStep.longitude,
+        );
+        if (metersAway > 30) break;
+        nextIndex += 1;
+        routeStepIndexRef.current = nextIndex;
+        setRouteStepIndex(nextIndex);
+        setNavigationStatus(nextStep.instruction);
+        speakInstruction(nextStep.instruction);
+      }
+    },
+    [speakInstruction],
+  );
+
+  const startLocationTracking = useCallback(async () => {
+    stopLocationTracking();
+    try {
+      locationSubscriptionRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          distanceInterval: 5,
+          timeInterval: 1000,
+        },
+        handleLocationUpdate,
+      );
+    } catch {
+      setNavigationStatus("Location tracking unavailable");
+    }
+  }, [handleLocationUpdate, stopLocationTracking]);
 
   const disconnect = useCallback(() => {
     if (speechListeningRef.current) {
@@ -85,7 +186,14 @@ export default function App() {
     vlmBusyRef.current = false;
     setPipelineBusy(false);
     setSpeechListening(false);
-  }, []);
+    stopLocationTracking();
+    routePlanRef.current = null;
+    routeStepIndexRef.current = 0;
+    routeRequestPendingRef.current = false;
+    setRoutePlan(null);
+    setRouteStepIndex(0);
+    setNavigationStatus("No route yet");
+  }, [stopLocationTracking]);
 
   const connect = useCallback(() => {
     disconnect();
@@ -97,7 +205,25 @@ export default function App() {
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data)) as ServerMessage;
-        if (payload.type === "status") {
+        if (payload.type === "route_plan" && payload.route?.steps?.length) {
+          const plan = payload.route;
+          routePlanRef.current = plan;
+          routeStepIndexRef.current = 0;
+          routeRequestPendingRef.current = false;
+          setRoutePlan(plan);
+          setRouteStepIndex(0);
+          setNavigationStatus(plan.steps[0].instruction);
+          setDestinationPrompt(`Route ready: ${formatRouteSummary(plan)}`);
+          setLastAlert(`Navigating to ${plan.destination}`);
+          streamingRef.current = true;
+          setStreaming(true);
+          speakInstruction(plan.steps[0].instruction);
+          void startLocationTracking();
+        } else if (payload.type === "route_error") {
+          routeRequestPendingRef.current = false;
+          setDestinationPrompt(`Route unavailable: ${payload.message ?? "try again"}`);
+          setNavigationStatus("No route yet");
+        } else if (payload.type === "status") {
           setVlmEnabled(payload.vlm_enabled !== false);
         } else if (payload.type === "pipeline_state") {
           const busy = payload.state === "busy";
@@ -135,9 +261,18 @@ export default function App() {
         setConnection("disconnected");
         setStreaming(false);
         streamingRef.current = false;
+        routeRequestPendingRef.current = false;
+        stopLocationTracking();
       }
     };
-  }, [deliverAlert, disconnect, serverUrl]);
+  }, [
+    deliverAlert,
+    disconnect,
+    serverUrl,
+    speakInstruction,
+    startLocationTracking,
+    stopLocationTracking,
+  ]);
 
   const sendFrame = useCallback(async () => {
     const socket = socketRef.current;
@@ -190,16 +325,52 @@ export default function App() {
 
   useEffect(() => () => disconnect(), [disconnect]);
 
-  const startStreamingForDestination = useCallback((value: string) => {
+  const startNavigationForDestination = useCallback(async (value: string) => {
     const target = value.trim();
-    if (!target || streamingRef.current) return;
+    const socket = socketRef.current;
+    if (!target || streamingRef.current || routeRequestPendingRef.current) return;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setDestinationPrompt("Connect to the server before starting navigation.");
+      return;
+    }
 
-    setDestinationPrompt("");
+    routeRequestPendingRef.current = true;
     setDestination(target);
     destinationTextRef.current = target;
-    streamingRef.current = true;
-    setStreaming(true);
-    setLastAlert(`Destination set: ${target}`);
+    setDestinationPrompt("Getting your location…");
+    setNavigationStatus("Finding a walking route…");
+
+    const permission = await Location.requestForegroundPermissionsAsync();
+    if (permission.status !== Location.PermissionStatus.GRANTED) {
+      routeRequestPendingRef.current = false;
+      setDestinationPrompt("Location permission is required for walking directions.");
+      setNavigationStatus("Location permission denied");
+      return;
+    }
+
+    try {
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      if (socket.readyState !== WebSocket.OPEN) {
+        routeRequestPendingRef.current = false;
+        setDestinationPrompt("The server disconnected. Tap Connect and try again.");
+        return;
+      }
+      setDestinationPrompt("Finding a walking route…");
+      socket.send(
+        JSON.stringify({
+          type: "route_start",
+          destination: target,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }),
+      );
+    } catch {
+      routeRequestPendingRef.current = false;
+      setDestinationPrompt("Could not read your location. Try again outdoors.");
+      setNavigationStatus("Location unavailable");
+    }
   }, []);
 
   useSpeechRecognitionEvent("start", () => {
@@ -221,7 +392,7 @@ export default function App() {
       if (speechListeningRef.current) {
         ExpoSpeechRecognitionModule.stop();
       } else {
-        startStreamingForDestination(transcript);
+        void startNavigationForDestination(transcript);
       }
     }
   });
@@ -233,7 +404,7 @@ export default function App() {
       pendingDestinationRef.current.trim() || destinationTextRef.current.trim();
     pendingDestinationRef.current = "";
     if (target && !streamingRef.current) {
-      startStreamingForDestination(target);
+      void startNavigationForDestination(target);
     } else if (!streamingRef.current) {
       setDestinationPrompt("No destination heard. Tap Start camera to try again.");
     }
@@ -280,11 +451,11 @@ export default function App() {
   const startStreaming = useCallback(() => {
     const target = destination.trim();
     if (target) {
-      startStreamingForDestination(target);
+      void startNavigationForDestination(target);
       return;
     }
     void startDestinationCapture();
-  }, [destination, startDestinationCapture, startStreamingForDestination]);
+  }, [destination, startDestinationCapture, startNavigationForDestination]);
 
   const cancelDestinationCapture = useCallback(() => {
     if (speechListeningRef.current) {
@@ -299,7 +470,15 @@ export default function App() {
   const stopStreaming = useCallback(() => {
     streamingRef.current = false;
     setStreaming(false);
-  }, []);
+    routeRequestPendingRef.current = false;
+    routePlanRef.current = null;
+    routeStepIndexRef.current = 0;
+    setRoutePlan(null);
+    setRouteStepIndex(0);
+    setNavigationStatus("Navigation stopped");
+    stopLocationTracking();
+    Speech.stop();
+  }, [stopLocationTracking]);
 
   const toggleStreaming = () => {
     if (streamingRef.current) {
@@ -382,6 +561,12 @@ export default function App() {
           <Text style={styles.status}>
             VLM: {!vlmEnabled ? "paused" : pipelineBusy ? "describing collision" : "ready"}
           </Text>
+          <Text style={styles.status}>Navigation: {navigationStatus}</Text>
+          {routePlan ? (
+            <Text style={styles.status}>
+              Step {Math.min(routeStepIndex + 1, routePlan.steps.length)} of {routePlan.steps.length} · {formatRouteSummary(routePlan)}
+            </Text>
+          ) : null}
           <Text accessibilityLiveRegion="assertive" style={styles.alert}>
             {lastAlert}
           </Text>
@@ -392,7 +577,7 @@ export default function App() {
             />
             <Button
               disabled={connection !== "connected" || speechListening}
-              title={streaming ? "Stop camera" : "Start camera / speak"}
+              title={streaming ? "Stop navigation" : "Navigate / speak"}
               onPress={toggleStreaming}
             />
             {speechListening ? (
