@@ -1,0 +1,14 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+*.pt
+node_modules/
+.expo/
+.eas/
+mobile/.git/
+ios/
+android/
+dist/
+.env
+.env.local
