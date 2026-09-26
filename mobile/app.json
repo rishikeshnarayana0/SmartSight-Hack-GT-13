@@ -31,7 +31,7 @@
         "expo-camera",
         {
           "cameraPermission": "The prototype uses the camera to send test frames to your local server.",
-          "microphonePermission": false,
+          "microphonePermission": "Allow the prototype to capture your spoken destination.",
           "recordAudioAndroid": false
         }
       ],
