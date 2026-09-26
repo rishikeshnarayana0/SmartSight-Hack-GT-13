@@ -160,7 +160,7 @@ The SDK 57 mobile dependencies require Node.js 22.13.0 or newer. The mobile
 folder includes an `.nvmrc` with the minimum supported version.
 
 In the app, enter `ws://YOUR_COMPUTER_LAN_IP:8765/ws` and tap **Connect**.
-Then tap **Start camera / speak** and say a destination when prompted. The app
+Then tap **Navigate / speak** and say a destination when prompted. The app
 requests foreground location, sends the destination and current coordinates to
 the laptop, and receives a walking route. It speaks the first step and watches
 GPS to speak each following step as you reach the maneuver. Every second the
