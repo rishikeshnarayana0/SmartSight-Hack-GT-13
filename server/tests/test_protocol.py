@@ -177,13 +177,13 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
             warning = await websocket.receive_json()
             self.assertEqual(
                 warning["message"],
-                "Person ahead. Move right, then continue straight.",
+                "Person detected. Move right, then continue straight.",
             )
             alert = await websocket.receive_json()
             self.assertEqual(alert, {
                 "type": "alert",
                 "source": "detector",
-                "message": "Person ahead. Move right, then continue straight.",
+                "message": "Person detected. Move right, then continue straight.",
             })
 
             await websocket.send_json(

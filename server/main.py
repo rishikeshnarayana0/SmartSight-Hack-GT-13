@@ -233,7 +233,7 @@ async def handle_phone_message(
             return
 
         detector_message = (
-            f"{collision.label.capitalize()} ahead. "
+            f"{collision.label.capitalize()} detected. "
             f"{avoidance_instruction(collision)}"
         )
 

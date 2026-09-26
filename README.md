@@ -171,7 +171,7 @@ the laptop, and receives a walking route. It speaks the first step and watches
 GPS to speak each following step as you reach the maneuver. Every second the
 phone also captures a small JPEG and sends it to YOLO. In the default mode, a
 possible collision triggers an immediate haptic warning and a short spoken
-avoidance instruction such as `Person ahead. Move right, then continue
+avoidance instruction such as `Person detected. Move right, then continue
 straight.`. The direction is chosen from the detected box's visible left/right
 clearance; it is a simple heuristic, not a guarantee that either side is safe.
 If Qwen is enabled, the phone waits for it to finish
@@ -208,8 +208,8 @@ Server to phone:
 ```json
 {"type":"distance","cm":42.1,"hazard":true}
 {"type":"alert","source":"hardware","message":"Obstacle 42 centimeters ahead."}
-{"type":"collision_warning","source":"detector","label":"person","message":"Person ahead. Move right, then continue straight."}
-{"type":"alert","source":"detector","message":"Person ahead. Move right, then continue straight."}
+{"type":"collision_warning","source":"detector","label":"person","message":"Person detected. Move right, then continue straight."}
+{"type":"alert","source":"detector","message":"Person detected. Move right, then continue straight."}
 {"type":"detector_result","hazard":false,"label":"object","confidence":0,"detections":[],"edge_map":"base64-png","warning_emitted":false}
 {"type":"pipeline_state","state":"busy"}
 {"type":"vision_result","hazard":true,"message":"Step left."}
