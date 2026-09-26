@@ -151,13 +151,18 @@ export default function App() {
         }
         audioBusyRef.current = true;
         if (next.buzz) buzz();
-        Speech.speak(next.message, {
-          language: "en",
-          rate: next.buzz ? 0.95 : 0.9,
-          onDone: playNext,
-          onStopped: playNext,
-          onError: playNext,
-        });
+        try {
+          Speech.speak(next.message, {
+            language: "en",
+            rate: next.buzz ? 0.95 : 0.9,
+            onDone: playNext,
+            onStopped: playNext,
+            onError: playNext,
+          });
+        } catch {
+          audioBusyRef.current = false;
+          setLastAlert("Phone speech is unavailable");
+        }
       };
 
       speechQueueRef.current.push({ message, buzz: shouldBuzz });
@@ -179,7 +184,11 @@ export default function App() {
   const stopAudio = useCallback(() => {
     speechQueueRef.current = [];
     audioBusyRef.current = false;
-    Speech.stop();
+    try {
+      Speech.stop();
+    } catch {
+      // Speech is optional; stopping it should never take down the app.
+    }
   }, []);
 
   const stopLocationTracking = useCallback(() => {
@@ -230,7 +239,11 @@ export default function App() {
 
   const disconnect = useCallback(() => {
     if (speechListeningRef.current) {
-      ExpoSpeechRecognitionModule.abort();
+      try {
+        ExpoSpeechRecognitionModule.abort();
+      } catch {
+        // The native speech module may be unavailable in Expo Go.
+      }
     }
     speechListeningRef.current = false;
     pendingDestinationRef.current = "";
@@ -442,15 +455,15 @@ export default function App() {
     setDestinationPrompt("Getting your location…");
     setNavigationStatus("Finding a walking route…");
 
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (permission.status !== Location.PermissionStatus.GRANTED) {
-      routeRequestPendingRef.current = false;
-      setDestinationPrompt("Location permission is required for walking directions.");
-      setNavigationStatus("Location permission denied");
-      return;
-    }
-
     try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        routeRequestPendingRef.current = false;
+        setDestinationPrompt("Location permission is required for walking directions.");
+        setNavigationStatus("Location permission denied");
+        return;
+      }
+
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
@@ -470,7 +483,7 @@ export default function App() {
       );
     } catch {
       routeRequestPendingRef.current = false;
-      setDestinationPrompt("Could not read your location. Try again outdoors.");
+      setDestinationPrompt("Location is unavailable. Check permission and try again.");
       setNavigationStatus("Location unavailable");
     }
   }, []);
@@ -492,7 +505,11 @@ export default function App() {
     if (event.isFinal) {
       pendingDestinationRef.current = transcript;
       if (speechListeningRef.current) {
-        ExpoSpeechRecognitionModule.stop();
+        try {
+          ExpoSpeechRecognitionModule.stop();
+        } catch {
+          // The end event will still finish the request if native stop fails.
+        }
       } else {
         void startNavigationForDestination(transcript);
       }
@@ -527,27 +544,46 @@ export default function App() {
     setDestination("");
     setDestinationPrompt("Requesting microphone permission…");
 
-    const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!permission.granted) {
-      setDestinationPrompt(
-        "Microphone and speech permissions are required for voice destinations.",
-      );
-      return;
-    }
+    try {
+      const permission =
+        await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        setDestinationPrompt(
+          "Microphone and speech permissions are required for voice destinations.",
+        );
+        return;
+      }
 
-    ExpoSpeechRecognitionModule.start({
-      lang: "en-US",
-      interimResults: true,
-      continuous: false,
-      addsPunctuation: true,
-      contextualStrings: [
-        "Georgia Tech",
-        "student center",
-        "library",
-        "classroom",
-        "dorm",
-      ],
-    });
+      try {
+        ExpoSpeechRecognitionModule.start({
+          lang: "en-US",
+          interimResults: true,
+          continuous: false,
+          addsPunctuation: true,
+          contextualStrings: [
+            "Georgia Tech",
+            "student center",
+            "library",
+            "classroom",
+            "dorm",
+          ],
+        });
+      } catch {
+        // Keep a minimal fallback for native versions that do not support
+        // punctuation/context options yet.
+        ExpoSpeechRecognitionModule.start({
+          lang: "en-US",
+          interimResults: true,
+          continuous: false,
+        });
+      }
+    } catch {
+      speechListeningRef.current = false;
+      setSpeechListening(false);
+      setDestinationPrompt(
+        "Voice input is unavailable in this build. Type a destination instead.",
+      );
+    }
   }, []);
 
   const startStreaming = useCallback(() => {
@@ -561,7 +597,11 @@ export default function App() {
 
   const cancelDestinationCapture = useCallback(() => {
     if (speechListeningRef.current) {
-      ExpoSpeechRecognitionModule.abort();
+      try {
+        ExpoSpeechRecognitionModule.abort();
+      } catch {
+        // Speech is optional; cancelling it should never crash the app.
+      }
     }
     speechListeningRef.current = false;
     pendingDestinationRef.current = "";
