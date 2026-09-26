@@ -45,6 +45,7 @@ class CollisionResult:
     confidence: float = 0.0
     detections: tuple[Detection, ...] = ()
     edge_map: str | None = None
+    hazard_detection: Detection | None = None
 
 
 class CollisionDetector:
@@ -167,6 +168,7 @@ class YoloCollisionDetector(CollisionDetector):
                     height=max(0.0, min(1.0, box_height / max(1.0, height))),
                 )
             )
+            detection = detections[-1]
             if label not in self.HAZARD_LABELS:
                 continue
 
@@ -181,7 +183,12 @@ class YoloCollisionDetector(CollisionDetector):
             if in_path and close_enough and (
                 best is None or confidence > best.confidence
             ):
-                best = CollisionResult(True, label, confidence)
+                best = CollisionResult(
+                    True,
+                    label,
+                    confidence,
+                    hazard_detection=detection,
+                )
 
         if best is None:
             return CollisionResult(False, detections=tuple(detections), edge_map=edge_map)
@@ -191,6 +198,7 @@ class YoloCollisionDetector(CollisionDetector):
             best.confidence,
             tuple(detections),
             edge_map,
+            best.hazard_detection,
         )
 
     async def detect(self, image_base64: str) -> CollisionResult:

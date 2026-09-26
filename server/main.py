@@ -122,18 +122,22 @@ def avoidance_instruction(collision: CollisionResult) -> str:
     the opposite side and continue straight. It is not a guarantee that the
     chosen side is physically clear.
     """
-    matching = [
-        detection
-        for detection in collision.detections
-        if detection.label.casefold() == collision.label.casefold()
-    ]
-    candidates = matching or list(collision.detections)
-    if not candidates:
+    obstacle = collision.hazard_detection
+    if obstacle is None:
+        matching = [
+            detection
+            for detection in collision.detections
+            if detection.label.casefold() == collision.label.casefold()
+        ]
+        candidates = matching or list(collision.detections)
+        if candidates:
+            obstacle = max(candidates, key=lambda detection: detection.confidence)
+
+    if obstacle is None:
         # A detector implementation without boxes still gets a deterministic,
         # conservative spoken instruction.
         return "Move right, then continue straight."
 
-    obstacle = max(candidates, key=lambda detection: detection.confidence)
     left_clearance = max(0.0, obstacle.x)
     right_clearance = max(0.0, 1.0 - (obstacle.x + obstacle.width))
     direction = "right" if right_clearance >= left_clearance else "left"
