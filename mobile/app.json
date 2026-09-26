@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Assistive Prototype",
+    "slug": "assistive-hardware-prototype",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "assistiveprototype",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.assistivehardware.prototype",
+      "infoPlist": {
+        "NSCameraUsageDescription": "The prototype uses the camera to send test frames to your local server.",
+        "NSMicrophoneUsageDescription": "Allow the prototype to capture your spoken destination.",
+        "NSSpeechRecognitionUsageDescription": "Allow the prototype to convert your spoken destination into text.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.assistivehardware.prototype",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "The prototype uses the camera to send test frames to your local server.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow the prototype to capture your spoken destination.",
+          "speechRecognitionPermission": "Allow the prototype to convert your spoken destination into text."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "77ac0f54-1354-4ee3-9b54-e8574fdcf25d"
+      }
+    }
+  }
+}
