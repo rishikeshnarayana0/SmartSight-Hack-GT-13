@@ -1,7 +1,9 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as Location from "expo-location";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Speech from "expo-speech";
 import {
   ExpoSpeechRecognitionModule,
@@ -45,6 +47,13 @@ type RoutePlan = {
   steps: RouteStep[];
 };
 
+type StairDirection = "up" | "down";
+
+type TTSAudio = {
+  base64: string;
+  mime_type: string;
+};
+
 type ServerMessage = {
   type: string;
   message?: string;
@@ -53,7 +62,10 @@ type ServerMessage = {
   source?: string;
   state?: "busy" | "idle";
   label?: string;
+  stair_direction?: StairDirection | null;
   vlm_enabled?: boolean;
+  tts_enabled?: boolean;
+  tts_audio?: TTSAudio;
   route?: RoutePlan;
   detections?: Detection[];
   edge_map?: string | null;
@@ -102,6 +114,7 @@ export default function App() {
   const [inference, setInference] = useState("waiting for a frame");
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [vlmEnabled, setVlmEnabled] = useState(true);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
   const [lastAlert, setLastAlert] = useState("No alerts");
   const [destination, setDestination] = useState("");
   const [destinationPrompt, setDestinationPrompt] = useState("");
@@ -126,19 +139,56 @@ export default function App() {
   const routeRequestPendingRef = useRef(false);
   const frameInFlightRef = useRef(false);
   const audioBusyRef = useRef(false);
-  const speechQueueRef = useRef<Array<{ message: string; buzz: boolean }>>([]);
+  const audioSoundRef = useRef<Audio.Sound | null>(null);
+  const speechQueueRef = useRef<
+    Array<{
+      message: string;
+      buzz: boolean;
+      ttsAudio?: TTSAudio;
+    }>
+  >([]);
+
+  const triggerHaptic = useCallback(
+    (pattern: "warning" | "stairs_up" | "stairs_down") => {
+      if (pattern === "warning") {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+
+      const styles =
+        pattern === "stairs_up"
+          ? [
+              Haptics.ImpactFeedbackStyle.Light,
+              Haptics.ImpactFeedbackStyle.Medium,
+              Haptics.ImpactFeedbackStyle.Heavy,
+            ]
+          : [
+              Haptics.ImpactFeedbackStyle.Heavy,
+              Haptics.ImpactFeedbackStyle.Medium,
+              Haptics.ImpactFeedbackStyle.Light,
+            ];
+      styles.forEach((style, index) => {
+        setTimeout(() => void Haptics.impactAsync(style), index * 180);
+      });
+    },
+    [],
+  );
 
   const buzz = useCallback(() => {
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-  }, []);
+    triggerHaptic("warning");
+  }, [triggerHaptic]);
 
   const enqueueSpeech = useCallback(
-    (message: string, shouldBuzz: boolean) => {
+    (
+      message: string,
+      options: { buzz?: boolean; ttsAudio?: TTSAudio } = {},
+    ) => {
+      const shouldBuzz = options.buzz ?? false;
       setLastAlert(message);
       const queue = speechQueueRef.current;
       if (audioBusyRef.current || queue.length > 0) {
         if (queue.length < 4 && queue[queue.length - 1]?.message !== message) {
-          queue.push({ message, buzz: shouldBuzz });
+          queue.push({ message, buzz: shouldBuzz, ttsAudio: options.ttsAudio });
         }
         return;
       }
@@ -151,39 +201,93 @@ export default function App() {
         }
         audioBusyRef.current = true;
         if (next.buzz) buzz();
-        try {
-          Speech.speak(next.message, {
-            language: "en",
-            rate: next.buzz ? 0.95 : 0.9,
-            onDone: playNext,
-            onStopped: playNext,
-            onError: playNext,
-          });
-        } catch {
-          audioBusyRef.current = false;
-          setLastAlert("Phone speech is unavailable");
+        const speakWithPhone = () => {
+          try {
+            Speech.speak(next.message, {
+              language: "en",
+              rate: next.buzz ? 0.95 : 0.9,
+              onDone: playNext,
+              onStopped: playNext,
+              onError: playNext,
+            });
+          } catch {
+            audioBusyRef.current = false;
+            setLastAlert("Phone speech is unavailable");
+            playNext();
+          }
+        };
+
+        if (!next.ttsAudio) {
+          speakWithPhone();
+          return;
         }
+
+        void (async () => {
+          const uri = `${FileSystem.cacheDirectory}elevenlabs-${Date.now()}.mp3`;
+          try {
+            await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+            await FileSystem.writeAsStringAsync(uri, next.ttsAudio?.base64 ?? "", {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const { sound } = await Audio.Sound.createAsync(
+              { uri },
+              { shouldPlay: true },
+              (status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                  const finishedSound = audioSoundRef.current;
+                  audioSoundRef.current = null;
+                  void finishedSound?.unloadAsync();
+                  void FileSystem.deleteAsync(uri, { idempotent: true });
+                  playNext();
+                }
+              },
+            );
+            audioSoundRef.current = sound;
+          } catch {
+            setLastAlert("ElevenLabs unavailable; using phone speech");
+            speakWithPhone();
+          }
+        })();
       };
 
-      speechQueueRef.current.push({ message, buzz: shouldBuzz });
+      speechQueueRef.current.push({
+        message,
+        buzz: shouldBuzz,
+        ttsAudio: options.ttsAudio,
+      });
       playNext();
     },
     [buzz],
   );
 
   const deliverAlert = useCallback(
-    (message: string) => enqueueSpeech(message, true),
+    (
+      message: string,
+      ttsAudio?: TTSAudio,
+      stairDirection?: StairDirection | null,
+    ) => {
+      enqueueSpeech(message, {
+        buzz: !stairDirection,
+        ttsAudio,
+      });
+    },
     [enqueueSpeech],
   );
 
   const speakInstruction = useCallback(
-    (message: string) => enqueueSpeech(message, false),
+    (message: string) => enqueueSpeech(message),
     [enqueueSpeech],
   );
 
   const stopAudio = useCallback(() => {
     speechQueueRef.current = [];
     audioBusyRef.current = false;
+    const sound = audioSoundRef.current;
+    audioSoundRef.current = null;
+    if (sound) {
+      void sound.stopAsync().catch(() => undefined);
+      void sound.unloadAsync().catch(() => undefined);
+    }
     try {
       Speech.stop();
     } catch {
@@ -299,6 +403,7 @@ export default function App() {
           setNavigationStatus("No route yet");
         } else if (payload.type === "status") {
           setVlmEnabled(payload.vlm_enabled !== false);
+          setTtsEnabled(payload.tts_enabled === true);
         } else if (payload.type === "pipeline_state") {
           const busy = payload.state === "busy";
           vlmBusyRef.current = busy;
@@ -311,7 +416,18 @@ export default function App() {
           frameInFlightRef.current = false;
           setFrameProcessing(false);
         } else if (payload.type === "collision_warning") {
-          setInference(`possible collision: ${payload.label ?? "object"}`);
+          if (payload.stair_direction) {
+            triggerHaptic(
+              payload.stair_direction === "up" ? "stairs_up" : "stairs_down",
+            );
+          }
+          setInference(
+            payload.stair_direction === "up"
+              ? "upward stairs ahead"
+              : payload.stair_direction === "down"
+                ? "downward stairs ahead"
+                : `possible collision: ${payload.label ?? "object"}`,
+          );
         } else if (payload.type === "detector_result") {
           if (!payload.hazard || payload.warning_emitted === false) {
             frameInFlightRef.current = false;
@@ -320,14 +436,18 @@ export default function App() {
           setDetections(payload.detections ?? []);
           setEdgeMap(payload.edge_map ?? null);
           setInference(
-            payload.hazard
+            payload.stair_direction === "up"
+              ? "upward stairs ahead"
+              : payload.stair_direction === "down"
+                ? "downward stairs ahead"
+                : payload.hazard
               ? `possible collision: ${payload.label ?? "object"}`
               : "clear",
           );
         } else if (payload.type === "alert" && payload.message) {
           frameInFlightRef.current = false;
           setFrameProcessing(false);
-          deliverAlert(payload.message);
+          deliverAlert(payload.message, payload.tts_audio, payload.stair_direction);
         } else if (payload.type === "vision_result") {
           setInference(
             payload.hazard ? `hazard: ${payload.message ?? "detected"}` : "clear",
@@ -365,6 +485,7 @@ export default function App() {
     speakInstruction,
     startLocationTracking,
     stopLocationTracking,
+    triggerHaptic,
   ]);
 
   const sendFrame = useCallback(async () => {
@@ -737,6 +858,9 @@ export default function App() {
           </Text>
           <Text style={styles.status}>
             VLM: {!vlmEnabled ? "paused" : pipelineBusy ? "describing collision" : "ready"}
+          </Text>
+          <Text style={styles.status}>
+            Alert voice: {ttsEnabled ? "ElevenLabs" : "phone fallback"}
           </Text>
           <Text style={styles.status}>Navigation: {navigationStatus}</Text>
           {routePlan ? (

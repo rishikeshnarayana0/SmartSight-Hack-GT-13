@@ -114,6 +114,30 @@ To enable Qwen after the YOLO collision warning:
 python server/main.py --detector yolo --vision-provider ollama --vision-model qwen2.5vl:3b
 ```
 
+### ElevenLabs voice and directional stair alerts
+
+Set an ElevenLabs key on the laptop/server; it is never sent to the phone:
+
+```bash
+export ELEVENLABS_API_KEY=your-elevenlabs-key
+export ELEVENLABS_VOICE_ID=your-voice-id
+```
+
+For distinct upward/downward haptics, the stair-aware weights must expose
+direction-specific classes such as `stairs_up`/`upstairs` and
+`stairs_down`/`downstairs`. Configure them separately from the normal object
+model:
+
+```bash
+export DETECTOR_STAIR_MODEL=/absolute/path/to/stairs_up_down.pt
+python server/main.py --detector yolo --stair-model "$DETECTOR_STAIR_MODEL" --tts-provider elevenlabs
+```
+
+Upward stairs speak `Upward stairs ahead. Climb carefully.` with a
+light-to-heavy three-pulse haptic pattern. Downward stairs speak
+`Downward stairs ahead. Descend carefully.` with the reverse heavy-to-light
+pattern. If ElevenLabs is unavailable, the phone falls back to native speech.
+
 For a UI smoke test without a model, use the deterministic provider:
 
 ```bash
@@ -183,10 +207,9 @@ GPS to speak each following step as you reach the maneuver. Every second the
 phone also captures a small JPEG and sends it to YOLO. In the default mode, a
 possible collision triggers an immediate haptic warning and a short spoken
 avoidance instruction such as `Person detected. Move right, then continue
-straight.`. For a stair label, it says `Stairs detected. Climb the stairs,
-then continue straight.`. The direction is chosen from the detected box's
-visible left/right clearance; it is a simple heuristic, not a guarantee that
-either side is safe.
+straight.`. Direction-specific stair labels trigger distinct voice and haptic
+signals; a generic `stairs` label uses the safe instruction `Stairs ahead.
+Stop and assess carefully.`.
 If Qwen is enabled, the phone waits for it to finish
 before capturing another frame. Routing uses OpenStreetMap Nominatim plus the
 public OpenStreetMap foot router; those services are rate limited and intended
@@ -222,7 +245,9 @@ Server to phone:
 {"type":"distance","cm":42.1,"hazard":true}
 {"type":"alert","source":"hardware","message":"Obstacle 42 centimeters ahead."}
 {"type":"collision_warning","source":"detector","label":"person","message":"Person detected. Move right, then continue straight."}
+{"type":"collision_warning","source":"detector","label":"stairs_up","stair_direction":"up","message":"Upward stairs ahead. Climb carefully."}
 {"type":"alert","source":"detector","message":"Person detected. Move right, then continue straight."}
+{"type":"alert","source":"detector","stair_direction":"down","message":"Downward stairs ahead. Descend carefully.","tts_audio":{"base64":"...","mime_type":"audio/mpeg"}}
 {"type":"detector_result","hazard":false,"label":"object","confidence":0,"detections":[],"edge_map":"base64-png","warning_emitted":false}
 {"type":"pipeline_state","state":"busy"}
 {"type":"vision_result","hazard":true,"message":"Step left."}

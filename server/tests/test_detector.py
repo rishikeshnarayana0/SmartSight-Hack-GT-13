@@ -10,10 +10,15 @@ from PIL import Image, ImageDraw
 SERVER_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER_DIR))
 
-from detector import Detection, build_canny_edge_map
+from detector import Detection, build_canny_edge_map, stair_direction_for_label
 
 
 class DetectorOverlayTests(unittest.TestCase):
+    def test_directional_stair_labels_are_normalized(self) -> None:
+        self.assertEqual(stair_direction_for_label("stairs_up"), "up")
+        self.assertEqual(stair_direction_for_label("Downstairs"), "down")
+        self.assertIsNone(stair_direction_for_label("stairs"))
+
     def test_detection_serializes_normalized_box(self) -> None:
         detection = Detection("chair", 0.87654, 0.1, 0.2, 0.3, 0.4)
         self.assertEqual(
