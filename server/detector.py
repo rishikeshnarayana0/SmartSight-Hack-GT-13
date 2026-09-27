@@ -83,12 +83,6 @@ class YoloCollisionDetector(CollisionDetector):
         "backpack",
         "skateboard",
         "stroller",
-        # These labels are available in stair-aware/custom weights. The stock
-        # COCO yolo11n weights do not include a stairs class.
-        "stair",
-        "stairs",
-        "staircase",
-        "stairway",
     }
 
     def __init__(

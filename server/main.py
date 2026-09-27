@@ -115,7 +115,6 @@ DETECTOR_LOCK_KEY = web.AppKey("detector_lock", asyncio.Lock)
 NAVIGATION_KEY = web.AppKey("navigation", NavigationService)
 
 COLLISION_WARNING_INTERVAL_SECONDS = 2.0
-STAIR_LABELS = frozenset(("stair", "stairs", "staircase", "stairway"))
 
 
 def avoidance_instruction(collision: CollisionResult) -> str:
@@ -158,8 +157,6 @@ def avoidance_instruction(collision: CollisionResult) -> str:
 
 def obstacle_instruction(collision: CollisionResult) -> str:
     """Return the short spoken instruction for a detected obstacle."""
-    if collision.label.casefold() in STAIR_LABELS:
-        return "Pause. Check whether the steps go up or down."
     return avoidance_instruction(collision)
 
 

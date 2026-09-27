@@ -136,17 +136,6 @@ The default command uses the YOLO gate and speaks a short object plus action ins
 python server/main.py --detector yolo --vision-provider off
 ```
 
-Stair instructions require stair-aware/custom YOLO weights because the stock
-`yolo11n.pt` COCO model has no stairs class. Replace the example path below
-with a real downloaded weights file; do not paste the placeholder literally:
-
-```bash
-python server/main.py \
-  --detector yolo \
-  --detector-model "$HOME/models/stair-aware.pt" \
-  --vision-provider off
-```
-
 To enable Qwen after the YOLO collision warning:
 
 ```bash
@@ -223,10 +212,8 @@ capture every 100 ms when processing and speech are idle; this is not guaranteed
 10 FPS. It sends the small JPEG to YOLO. In the default mode, a
 possible collision triggers an immediate haptic warning and a short spoken
 avoidance instruction such as `Person detected. Move right, then continue
-straight.`. A custom stair label prompts the user to pause and check whether
-steps go up or down; stock weights cannot recognize stairs. The direction is chosen from the detected box's
-visible left/right clearance; it is a simple heuristic, not a guarantee that
-either side is safe.
+straight.`. Directions are chosen from the detected box's visible left/right
+clearance; this is a simple heuristic, not a guarantee that either side is safe.
 If Qwen is enabled, the phone waits for it to finish
 before capturing another frame. Routing uses OpenStreetMap Nominatim plus the
 public OpenStreetMap foot router; those services are rate limited and intended

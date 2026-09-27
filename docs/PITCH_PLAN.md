@@ -28,7 +28,7 @@ Do not reuse the supplied deck's population estimates, guide-dog costs, comparat
 | 4. How it works | Camera on iPhone. Detection on laptop. Walking route from OSM services. Spoken feedback on phone. | One architecture diagram with optional ElevenLabs branch | YOLO is stock, bounding-box proximity is heuristic, boundary estimation uses Canny/Hough, route geometry comes from the routing service. Optional VLM remains off for the core demo. |
 | 5. What the screen tells us | Objects, estimated boundaries, and a GPS route | Annotated real screenshot | Distinguish camera-space boundary lines from the north-up route diagram. Neither is a depth map or a guaranteed safe corridor. Explain that frames pause during speech in this version. |
 | 6. What we measured | Report actual trial results here after testing | Small table: trial count, warning-onset latency median/p95, missed obstacles, false warnings | Until measurements exist, title this “Evaluation plan.” Don't present the processing timer as FPS or frame round-trip time as speech-onset time. State device, lighting, network, model and sample count. |
-| 7. Next validation | Evaluate with mobility specialists and users. Improve ground and step understanding. | Team / prototype photo | State current limits: no verified stair direction, no metric depth, no autonomous traversal, network dependence. Give judges one concrete next experiment. |
+| 7. Next validation | Evaluate with mobility specialists and users. Improve ground understanding. | Team / prototype photo | State current limits: no stair recognition, no metric depth, no autonomous traversal, network dependence. Give judges one concrete next experiment. |
 
 Use a dark navy background with warm white type, teal for route/boundary estimates and amber for detections. Keep one main visual per slide. Use actual app screenshots after the native build is tested. Do not fabricate screenshots that imply working capabilities.
 
@@ -47,7 +47,7 @@ Use a dark navy background with warm white type, teal for route/boundary estimat
 
 **Is it all running on the phone?** No. The phone captures frames, obtains GPS and plays feedback. A nearby laptop runs YOLO and calls routing/TTS services.
 
-**Can it recognize stairs?** The installed COCO model cannot. The code accepts stair labels from suitable weights, but warns to check step direction rather than prescribing a climb.
+**Can it recognize stairs?** No. Stair detection is outside this prototype's current object classes.
 
 **Does the colored corridor prove it is safe?** No. It estimates two converging image boundaries. Ground segmentation, depth, and empirical validation are future work.
 

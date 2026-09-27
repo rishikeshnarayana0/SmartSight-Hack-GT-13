@@ -63,18 +63,6 @@ class FakeCollisionDetector(CollisionDetector):
 
 
 class AvoidanceInstructionTests(unittest.TestCase):
-    def test_stairs_instruction_does_not_assume_direction(self) -> None:
-        collision = CollisionResult(
-            True,
-            "stairs",
-            0.9,
-            detections=(Detection("stairs", 0.9, 0.2, 0.35, 0.6, 0.5),),
-        )
-        self.assertEqual(
-            obstacle_instruction(collision),
-            "Pause. Check whether the steps go up or down.",
-        )
-
     def test_moves_away_from_left_side_obstacle(self) -> None:
         collision = CollisionResult(
             True,

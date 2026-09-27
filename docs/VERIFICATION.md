@@ -31,7 +31,7 @@
 ## Deliberately out of scope for this build
 
 Metric depth, ground segmentation, SLAM, autonomous obstacle traversal, automatic
-off-route replanning, stair direction detection, and safety certification. Canny
+off-route replanning, stair recognition, and safety certification. Canny
 boundary estimates and bounding-box avoidance cannot establish safe movement.
 Camera processing pauses during speech as requested, creating a perception gap.
 Use a controlled, supervised demo and disclose this limitation.
