@@ -98,12 +98,13 @@ python server/main.py --detector yolo --vision-provider off
 ```
 
 Stair instructions require stair-aware/custom YOLO weights because the stock
-`yolo11n.pt` COCO model has no stairs class. Use them like this:
+`yolo11n.pt` COCO model has no stairs class. Replace the example path below
+with a real downloaded weights file; do not paste the placeholder literally:
 
 ```bash
 python server/main.py \
   --detector yolo \
-  --detector-model /path/to/stair-aware.pt \
+  --detector-model "$HOME/models/stair-aware.pt" \
   --vision-provider off
 ```
 
