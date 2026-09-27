@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import unittest
@@ -62,7 +63,7 @@ class FakeCollisionDetector(CollisionDetector):
 
 
 class AvoidanceInstructionTests(unittest.TestCase):
-    def test_stairs_instruction_says_to_climb(self) -> None:
+    def test_stairs_instruction_does_not_assume_direction(self) -> None:
         collision = CollisionResult(
             True,
             "stairs",
@@ -71,7 +72,7 @@ class AvoidanceInstructionTests(unittest.TestCase):
         )
         self.assertEqual(
             obstacle_instruction(collision),
-            "Climb the stairs, then continue straight.",
+            "Pause. Check whether the steps go up or down.",
         )
 
     def test_moves_away_from_left_side_obstacle(self) -> None:
@@ -129,16 +130,27 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
 
         websocket = await self.client.ws_connect("/ws")
         connected = await websocket.receive_json()
-        self.assertEqual(
-            connected,
-            {"type": "status", "message": "connected", "vlm_enabled": False},
-        )
+        self.assertEqual(connected["type"], "status")
+        self.assertFalse(connected["vlm_enabled"])
+        self.assertIn("token", connected)
 
         await websocket.send_json({"type": "demo_alert"})
         alert = await websocket.receive_json()
         self.assertEqual(alert["type"], "alert")
         self.assertEqual(alert["source"], "demo")
         await websocket.close()
+
+    async def test_camera_alerts_are_not_sent_to_another_phone(self) -> None:
+        first = await self.client.ws_connect('/ws')
+        second = await self.client.ws_connect('/ws')
+        await first.receive_json()
+        await second.receive_json()
+        await first.send_json({'type': 'demo_alert'})
+        self.assertEqual((await first.receive_json())['type'], 'alert')
+        with self.assertRaises(asyncio.TimeoutError):
+            await asyncio.wait_for(second.receive_json(), .05)
+        await first.close()
+        await second.close()
 
     async def test_phone_frame_runs_vision_and_emits_alert(self) -> None:
         client = TestClient(

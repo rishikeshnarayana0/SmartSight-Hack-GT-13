@@ -38,6 +38,7 @@ class RoutePlan:
     distance_m: float
     duration_s: float
     steps: tuple[RouteStep, ...]
+    geometry: tuple[tuple[float, float], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +46,7 @@ class RoutePlan:
             "distance_m": round(self.distance_m, 1),
             "duration_s": round(self.duration_s, 1),
             "steps": [step.as_dict() for step in self.steps],
+            "geometry": self.geometry,
         }
 
 
@@ -142,6 +144,8 @@ def parse_route_response(payload: dict[str, Any], destination: str) -> RoutePlan
         distance_m=float(route.get("distance") or 0.0),
         duration_s=float(route.get("duration") or 0.0),
         steps=tuple(steps),
+        geometry=tuple(tuple(point[:2]) for point in (route.get("geometry") or {}).get("coordinates", [])
+                       if isinstance(point, list) and len(point) >= 2),
     )
 
 
@@ -226,7 +230,7 @@ class NavigationService:
             f"{self.router_url}/{longitude},{latitude};{destination_longitude},{destination_latitude}",
             {
                 "steps": "true",
-                "overview": "false",
+                "overview": "full",
                 "alternatives": "false",
                 "geometries": "geojson",
             },

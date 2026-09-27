@@ -47,7 +47,8 @@
         {
           "locationWhenInUsePermission": "Allow the prototype to use your location for walking directions."
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "extra": {
       "eas": {

@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import WSMsgType, web
+try:
+    from .speech import SPEECH_KEY, SpeechService, create_speech, get_speech
+except ImportError:
+    from speech import SPEECH_KEY, SpeechService, create_speech, get_speech
 
 try:
     from .vision import (
@@ -108,7 +112,6 @@ VISION_ENABLED_KEY = web.AppKey("vision_enabled", bool)
 DETECTOR_KEY = web.AppKey("detector", CollisionDetector)
 INFERENCE_LOCK_KEY = web.AppKey("inference_lock", asyncio.Lock)
 DETECTOR_LOCK_KEY = web.AppKey("detector_lock", asyncio.Lock)
-PIPELINE_STATE_KEY = web.AppKey("pipeline_state", PipelineState)
 NAVIGATION_KEY = web.AppKey("navigation", NavigationService)
 
 COLLISION_WARNING_INTERVAL_SECONDS = 2.0
@@ -137,18 +140,26 @@ def avoidance_instruction(collision: CollisionResult) -> str:
     if obstacle is None:
         # A detector implementation without boxes still gets a deterministic,
         # conservative spoken instruction.
-        return "Move right, then continue straight."
+        return "Pause and check your surroundings."
 
     left_clearance = max(0.0, obstacle.x)
     right_clearance = max(0.0, 1.0 - (obstacle.x + obstacle.width))
     direction = "right" if right_clearance >= left_clearance else "left"
+    if max(left_clearance, right_clearance) < 0.25:
+        return "Pause. The way ahead is obstructed."
+    for other in collision.detections:
+        if other == obstacle or other.y + other.height < 0.55:
+            continue
+        center = other.x + other.width / 2
+        if (direction == "left" and center < .5) or (direction == "right" and center >= .5):
+            return "Pause. Obstacles on both sides."
     return f"Move {direction}, then continue straight."
 
 
 def obstacle_instruction(collision: CollisionResult) -> str:
     """Return the short spoken instruction for a detected obstacle."""
     if collision.label.casefold() in STAIR_LABELS:
-        return "Climb the stairs, then continue straight."
+        return "Pause. Check whether the steps go up or down."
     return avoidance_instruction(collision)
 
 
@@ -157,7 +168,6 @@ async def handle_phone_message(
     app: web.Application,
     payload: dict[str, Any],
 ) -> None:
-    hub = app[HUB_KEY]
     message_type = payload.get("type")
 
     if message_type == "route_start":
@@ -195,7 +205,7 @@ async def handle_phone_message(
             await websocket.send_json({"type": "error", "message": "Invalid frame"})
             return
 
-        state = app[PIPELINE_STATE_KEY]
+        state = websocket.navigation_state
         if state.vlm_busy:
             await websocket.send_json({"type": "pipeline_busy", "id": frame_id})
             return
@@ -216,13 +226,11 @@ async def handle_phone_message(
         if collision.hazard:
             now = time.monotonic()
             warning_emitted = (
-                now - app[PIPELINE_STATE_KEY].last_collision_at
+                now - state.last_collision_at
                 >= COLLISION_WARNING_INTERVAL_SECONDS
             )
             if warning_emitted:
-                app[PIPELINE_STATE_KEY].last_collision_at = now
-        else:
-            app[PIPELINE_STATE_KEY].last_collision_at = 0.0
+                state.last_collision_at = now
 
         await websocket.send_json(
             {
@@ -234,6 +242,8 @@ async def handle_phone_message(
                 "detections": [detection.as_dict() for detection in collision.detections],
                 "edge_map": collision.edge_map,
                 "warning_emitted": warning_emitted,
+                "path": collision.path,
+                "frame_size": collision.frame_size,
             }
         )
 
@@ -247,7 +257,7 @@ async def handle_phone_message(
 
         # The detector warning is immediate and throttled. In YOLO-only mode,
         # this is also the complete spoken output; the VLM is optional.
-        await hub.broadcast(
+        await websocket.send_json(
             {
                 "type": "collision_warning",
                 "source": "detector",
@@ -257,7 +267,7 @@ async def handle_phone_message(
         )
 
         if not app[VISION_ENABLED_KEY]:
-            await hub.broadcast(
+            await websocket.send_json(
                 {
                     "type": "alert",
                     "source": "detector",
@@ -267,7 +277,7 @@ async def handle_phone_message(
             return
 
         state.vlm_busy = True
-        await hub.broadcast({"type": "pipeline_state", "state": "busy"})
+        await websocket.send_json({"type": "pipeline_state", "state": "busy"})
         inference_lock = app[INFERENCE_LOCK_KEY]
         try:
             # Keep at most one model request in flight. The phone also pauses
@@ -276,7 +286,7 @@ async def handle_phone_message(
                 try:
                     result = await app[VISION_PROVIDER_KEY].infer(image)
                 except VisionError as exc:
-                    await hub.broadcast(
+                    await websocket.send_json(
                         {
                             "type": "inference_error",
                             "id": frame_id,
@@ -285,7 +295,7 @@ async def handle_phone_message(
                     )
                     return
 
-            await hub.broadcast(
+            await websocket.send_json(
                 {
                     "type": "vision_result",
                     "id": frame_id,
@@ -293,7 +303,7 @@ async def handle_phone_message(
                     "message": result.message,
                 }
             )
-            await hub.broadcast(
+            await websocket.send_json(
                 {
                     "type": "alert",
                     "source": "vision",
@@ -302,11 +312,11 @@ async def handle_phone_message(
             )
         finally:
             state.vlm_busy = False
-            await hub.broadcast({"type": "pipeline_state", "state": "idle"})
+            await websocket.send_json({"type": "pipeline_state", "state": "idle"})
         return
 
     if message_type == "demo_alert":
-        await hub.broadcast(
+        await websocket.send_json(
             {
                 "type": "alert",
                 "source": "demo",
@@ -325,6 +335,7 @@ async def handle_phone_message(
 async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     hub = request.app[HUB_KEY]
     websocket = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024 * 1024)
+    websocket.navigation_state = PipelineState()
     await websocket.prepare(request)
     hub.clients.add(websocket)
     await websocket.send_json(
@@ -332,6 +343,8 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
             "type": "status",
             "message": "connected",
             "vlm_enabled": request.app[VISION_ENABLED_KEY],
+            "enabled": bool(request.app[SPEECH_KEY].key),
+            "token": request.app[SPEECH_KEY].token,
         }
     )
 
@@ -425,8 +438,10 @@ def create_app(
     app[DETECTOR_KEY] = detector or YoloCollisionDetector()
     app[INFERENCE_LOCK_KEY] = asyncio.Lock()
     app[DETECTOR_LOCK_KEY] = asyncio.Lock()
-    app[PIPELINE_STATE_KEY] = PipelineState()
     app[NAVIGATION_KEY] = navigation or NavigationService()
+    app[SPEECH_KEY] = SpeechService()
+    app.router.add_post("/speech", create_speech)
+    app.router.add_get("/speech/{identifier}.mp3", get_speech)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/ws", websocket_handler)
 
@@ -444,6 +459,7 @@ def create_app(
                 await task
         await application[VISION_PROVIDER_KEY].close()
         await application[NAVIGATION_KEY].close()
+        await application[SPEECH_KEY].close()
 
     app.on_startup.append(start_background_tasks)
     app.on_cleanup.append(stop_background_tasks)

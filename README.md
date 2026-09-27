@@ -1,4 +1,42 @@
-# Assistive Hardware Prototype
+# SmartSight — assistive navigation prototype
+
+## Quick start (existing installation)
+
+From the project root, run `python3 scripts/dev.py`. This starts the YOLO server
+and Expo development bundler, and sets the phone's server address. If multiple
+network interfaces are found, use `python3 scripts/dev.py --ip YOUR_LAPTOP_IP`.
+The phone and laptop must be reachable on the same network; USB alone does not
+make the WebSocket connection work. Keep the app foregrounded.
+
+After these changes, rebuild the native app once:
+
+```bash
+cd mobile
+npm install
+npx expo run:ios --device
+```
+
+Use Xcode's Personal Team signing for the free-account local build. Expo Go
+cannot provide this app's native speech recognition. The new SVG and audio
+dependencies also require rebuilding; reloading JavaScript is not sufficient.
+
+See [pitch plan](docs/PITCH_PLAN.md) and [1–3 minute video plan](docs/VIDEO_PLAN.md).
+
+## Optional ElevenLabs voice
+
+Set `ELEVENLABS_API_KEY` in the server's environment before starting it. Keep it
+out of `EXPO_PUBLIC_*`, source files, and Git. `.env.example` documents supported
+variables; the server does not automatically load `.env`. The integration uses
+the [ElevenLabs speech endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).
+If the service is unavailable, the phone falls back to device speech. Generated
+audio is cached only in server memory. The LAN session token is not production
+authentication: do not expose this server to the public internet. Cloud voice
+sends spoken instruction text to ElevenLabs, not camera frames.
+
+The interface includes a fitted camera overlay, object labels/confidences,
+estimated boundary lines, a north-up route overview, next-step distance, camera-only
+mode, and connection/latency/voice diagnostics. Path lines are heuristic estimates,
+not a guarantee of walkable space. They disappear when no boundary pair is found.
 
 A deliberately small proof of concept for an obstacle-warning wearable:
 
@@ -14,9 +52,9 @@ detector and still works if Wi-Fi drops. Camera frames are checked by YOLO at
 up to ten frames per second, with a strict one-frame-in-flight gate. A new
 frame is not captured while the previous frame is being processed or while
 spoken audio is playing. A likely collision is warned at most once every two
-seconds. The default output is YOLO-only: `Person ahead.` or `Chair ahead.`.
-The camera preview draws normalized YOLO boxes and labels plus a compact Canny
-overlay limited to a lower-center forward-path trapezoid. This is a cheap ROI
+seconds. The default output is YOLO-only: an object label and avoidance suggestion.
+The camera preview draws normalized YOLO boxes and labels plus a
+Canny/Hough estimate of converging lower-image boundaries. This is a cheap
 heuristic, not semantic walkable-path segmentation. If the optional Ollama
 model is enabled, only the warning frame is sent for spoken guidance, and the
 phone pauses capture while it runs.
@@ -67,7 +105,8 @@ The motor works on its own after upload. The board also emits one JSON line ever
 
 ## 2. Install the local models
 
-Install [Ollama](https://ollama.com), start it, and pull a vision model:
+Ollama is optional and is not required for the default YOLO-only demo.
+To enable it, install [Ollama](https://ollama.com), start it, and pull a vision model:
 
 ```bash
 ollama pull qwen2.5vl:3b
@@ -179,12 +218,13 @@ In the app, enter `ws://YOUR_COMPUTER_LAN_IP:8765/ws` and tap **Connect**.
 Then tap **Navigate / speak** and say a destination when prompted. The app
 requests foreground location, sends the destination and current coordinates to
 the laptop, and receives a walking route. It speaks the first step and watches
-GPS to speak each following step as you reach the maneuver. Every second the
-phone also captures a small JPEG and sends it to YOLO. In the default mode, a
+GPS to speak each following step as you reach the maneuver. The phone attempts
+capture every 100 ms when processing and speech are idle; this is not guaranteed
+10 FPS. It sends the small JPEG to YOLO. In the default mode, a
 possible collision triggers an immediate haptic warning and a short spoken
 avoidance instruction such as `Person detected. Move right, then continue
-straight.`. For a stair label, it says `Stairs detected. Climb the stairs,
-then continue straight.`. The direction is chosen from the detected box's
+straight.`. A custom stair label prompts the user to pause and check whether
+steps go up or down; stock weights cannot recognize stairs. The direction is chosen from the detected box's
 visible left/right clearance; it is a simple heuristic, not a guarantee that
 either side is safe.
 If Qwen is enabled, the phone waits for it to finish

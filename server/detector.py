@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from PIL import Image
+try:
+    from .pathing import estimate_path
+except ImportError:
+    from pathing import estimate_path
 
 
 class DetectorError(RuntimeError):
@@ -46,6 +50,8 @@ class CollisionResult:
     detections: tuple[Detection, ...] = ()
     edge_map: str | None = None
     hazard_detection: Detection | None = None
+    path: dict | None = None
+    frame_size: tuple[int, int] = (320, 240)
 
 
 class CollisionDetector:
@@ -125,6 +131,7 @@ class YoloCollisionDetector(CollisionDetector):
             raise DetectorError("Camera frame was not valid base64 image data") from exc
 
         edge_map = build_canny_edge_map(image)
+        path = estimate_path(image)
 
         model = self._load_model()
         try:
@@ -138,13 +145,13 @@ class YoloCollisionDetector(CollisionDetector):
             raise DetectorError("YOLO failed to process the camera frame") from exc
 
         if not results:
-            return CollisionResult(False, edge_map=edge_map)
+            return CollisionResult(False, edge_map=edge_map, path=path, frame_size=image.size)
 
         result = results[0]
         boxes = getattr(result, "boxes", None)
         names = getattr(result, "names", {})
         if boxes is None:
-            return CollisionResult(False, edge_map=edge_map)
+            return CollisionResult(False, edge_map=edge_map, path=path, frame_size=image.size)
 
         width, height = image.size
         best: CollisionResult | None = None
@@ -197,7 +204,8 @@ class YoloCollisionDetector(CollisionDetector):
                 )
 
         if best is None:
-            return CollisionResult(False, detections=tuple(detections), edge_map=edge_map)
+            return CollisionResult(False, detections=tuple(detections), edge_map=edge_map,
+                                   path=path, frame_size=image.size)
         return CollisionResult(
             True,
             best.label,
@@ -205,6 +213,8 @@ class YoloCollisionDetector(CollisionDetector):
             tuple(detections),
             edge_map,
             best.hazard_detection,
+            path,
+            image.size,
         )
 
     async def detect(self, image_base64: str) -> CollisionResult:
